@@ -83,12 +83,6 @@ UPDATE people SET name = ? WHERE id = ? AND group_id = ?;
 -- name: DeletePerson :exec
 DELETE FROM people WHERE id = ? AND group_id = ?;
 
--- name: TogglePresent :exec
-UPDATE people SET present = 1 - present WHERE id = ? AND group_id = ?;
-
--- name: ClearPresence :exec
-UPDATE people SET present = 0 WHERE group_id = ?;
-
 -- ---- shows ----
 
 -- name: ListShows :many

@@ -203,16 +203,15 @@ func (s *Store) Invite(ctx context.Context, token string) (groupID int64, groupN
 // ---- people ----
 
 type Person struct {
-	ID      int64
-	Name    string
-	Present bool
+	ID   int64
+	Name string
 }
 
 func (s *Store) ListPeople(ctx context.Context, groupID int64) ([]Person, error) {
 	rows, err := s.q.ListPeople(ctx, groupID)
 	out := make([]Person, len(rows))
 	for i, r := range rows {
-		out[i] = Person{ID: r.ID, Name: r.Name, Present: r.Present}
+		out[i] = Person{ID: r.ID, Name: r.Name}
 	}
 	return out, err
 }
@@ -227,14 +226,6 @@ func (s *Store) RenamePerson(ctx context.Context, groupID, personID int64, name 
 
 func (s *Store) DeletePerson(ctx context.Context, groupID, personID int64) error {
 	return s.q.DeletePerson(ctx, sqlcgen.DeletePersonParams{ID: personID, GroupID: groupID})
-}
-
-func (s *Store) TogglePresent(ctx context.Context, groupID, personID int64) error {
-	return s.q.TogglePresent(ctx, sqlcgen.TogglePresentParams{ID: personID, GroupID: groupID})
-}
-
-func (s *Store) ClearPresence(ctx context.Context, groupID int64) error {
-	return s.q.ClearPresence(ctx, groupID)
 }
 
 // ---- shows ----

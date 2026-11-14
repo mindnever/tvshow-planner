@@ -59,15 +59,6 @@ func (q *Queries) AddShowWatcher(ctx context.Context, arg AddShowWatcherParams) 
 	return err
 }
 
-const clearPresence = `-- name: ClearPresence :exec
-UPDATE people SET present = 0 WHERE group_id = ?
-`
-
-func (q *Queries) ClearPresence(ctx context.Context, groupID int64) error {
-	_, err := q.db.ExecContext(ctx, clearPresence, groupID)
-	return err
-}
-
 const createGroup = `-- name: CreateGroup :one
 
 INSERT INTO watch_groups (name) VALUES (?) RETURNING id
@@ -399,7 +390,7 @@ func (q *Queries) ListManagers(ctx context.Context, groupID int64) ([]ListManage
 
 const listPeople = `-- name: ListPeople :many
 
-SELECT id, group_id, name, present FROM people WHERE group_id = ? ORDER BY name COLLATE NOCASE, id
+SELECT id, group_id, name FROM people WHERE group_id = ? ORDER BY name COLLATE NOCASE, id
 `
 
 // ---- people ----
@@ -412,12 +403,7 @@ func (q *Queries) ListPeople(ctx context.Context, groupID int64) ([]Person, erro
 	var items []Person
 	for rows.Next() {
 		var i Person
-		if err := rows.Scan(
-			&i.ID,
-			&i.GroupID,
-			&i.Name,
-			&i.Present,
-		); err != nil {
+		if err := rows.Scan(&i.ID, &i.GroupID, &i.Name); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -571,20 +557,6 @@ type SetShowArchivedParams struct {
 
 func (q *Queries) SetShowArchived(ctx context.Context, arg SetShowArchivedParams) error {
 	_, err := q.db.ExecContext(ctx, setShowArchived, arg.Archived, arg.ID, arg.GroupID)
-	return err
-}
-
-const togglePresent = `-- name: TogglePresent :exec
-UPDATE people SET present = 1 - present WHERE id = ? AND group_id = ?
-`
-
-type TogglePresentParams struct {
-	ID      int64
-	GroupID int64
-}
-
-func (q *Queries) TogglePresent(ctx context.Context, arg TogglePresentParams) error {
-	_, err := q.db.ExecContext(ctx, togglePresent, arg.ID, arg.GroupID)
 	return err
 }
 

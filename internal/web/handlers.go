@@ -90,15 +90,24 @@ type resultView struct {
 	Finished bool
 }
 
+// personView is a person with whether this browser has them ticked as present.
+type personView struct {
+	ID      int64
+	Name    string
+	Present bool
+}
+
 type plannerView struct {
-	People     []db.Person
+	People     []personView
 	AnyPresent bool
 	Results    []resultView
 	HasShows   bool
 	SyncError  string
 }
 
-func (s *Server) plannerView(ctx context.Context, g db.Group) (plannerView, error) {
+// plannerView ranks the group's shows for the people in here (person IDs
+// ticked as present; IDs that aren't people of this group are ignored).
+func (s *Server) plannerView(ctx context.Context, g db.Group, here map[int64]bool) (plannerView, error) {
 	var v plannerView
 	people, err := s.store.ListPeople(ctx, g.ID)
 	if err != nil {
@@ -114,12 +123,12 @@ func (s *Server) plannerView(ctx context.Context, g db.Group) (plannerView, erro
 	}
 	v.SyncError = g.LastSyncError
 
-	v.People = people
 	names := map[int64]string{}
 	var present []int64
 	for _, p := range people {
 		names[p.ID] = p.Name
-		if p.Present {
+		v.People = append(v.People, personView{ID: p.ID, Name: p.Name, Present: here[p.ID]})
+		if here[p.ID] {
 			present = append(present, p.ID)
 		}
 	}
@@ -167,11 +176,11 @@ func (s *Server) planner(w http.ResponseWriter, r *http.Request, g db.Group) {
 		}
 		cancel()
 	}
-	s.renderPlanner(w, r, g, "base")
+	s.renderPlanner(w, r, g, "base", readPresence(r)[g.ID])
 }
 
-func (s *Server) renderPlanner(w http.ResponseWriter, r *http.Request, g db.Group, tmpl string) {
-	v, err := s.plannerView(r.Context(), g)
+func (s *Server) renderPlanner(w http.ResponseWriter, r *http.Request, g db.Group, tmpl string, here map[int64]bool) {
+	v, err := s.plannerView(r.Context(), g, here)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -181,24 +190,34 @@ func (s *Server) renderPlanner(w http.ResponseWriter, r *http.Request, g db.Grou
 
 // afterPresence answers htmx with just the planner fragment, and plain form
 // posts with a redirect.
-func (s *Server) afterPresence(w http.ResponseWriter, r *http.Request, g db.Group, err error) {
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
+func (s *Server) afterPresence(w http.ResponseWriter, r *http.Request, g db.Group, p presence) {
+	s.writePresence(w, r, p)
 	if r.Header.Get("HX-Request") != "" {
-		s.renderPlanner(w, r, g, "planner")
+		s.renderPlanner(w, r, g, "planner", p[g.ID])
 		return
 	}
 	redirect(w, r, groupPath(g, ""))
 }
 
 func (s *Server) togglePresence(w http.ResponseWriter, r *http.Request, g db.Group) {
-	s.afterPresence(w, r, g, s.store.TogglePresent(r.Context(), g.ID, pathID(r, "pid")))
+	p := readPresence(r)
+	if pid := pathID(r, "pid"); pid > 0 {
+		if p[g.ID] == nil {
+			p[g.ID] = map[int64]bool{}
+		}
+		if p[g.ID][pid] {
+			delete(p[g.ID], pid)
+		} else {
+			p[g.ID][pid] = true
+		}
+	}
+	s.afterPresence(w, r, g, p)
 }
 
 func (s *Server) clearPresence(w http.ResponseWriter, r *http.Request, g db.Group) {
-	s.afterPresence(w, r, g, s.store.ClearPresence(r.Context(), g.ID))
+	p := readPresence(r)
+	delete(p, g.ID)
+	s.afterPresence(w, r, g, p)
 }
 
 func (s *Server) syncNow(w http.ResponseWriter, r *http.Request, g db.Group) {

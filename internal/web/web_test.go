@@ -352,11 +352,36 @@ func TestEndToEnd(t *testing.T) {
 
 	// Another manager sees the group through the owner's Jellyfin account.
 	bob := app.client("bob")
+	checkPresence := func() {
+		// Who's here is per browser: neither bob nor a second alice session
+		// sees alice's ticks, and their own don't change hers.
+		pressed := func(c *http.Client) int {
+			_, body := app.do(c, "GET", "/g/1", nil)
+			return strings.Count(body, `aria-pressed="true"`)
+		}
+		alice2 := app.client("alice")
+		if a, b, a2 := pressed(alice), pressed(bob), pressed(alice2); a != 2 || b != 0 || a2 != 0 {
+			t.Errorf("present ticks: alice=%d bob=%d alice2=%d, want 2, 0, 0", a, b, a2)
+		}
+		app.post(bob, "/g/1/presence/3", nil)
+		app.post(alice2, "/g/1/presence/clear", nil)
+		if a, b := pressed(alice), pressed(bob); a != 2 || b != 1 {
+			t.Errorf("after bob ticks Cy: alice=%d bob=%d, want 2, 1", a, b)
+		}
+		// Logging out forgets the selection in that browser.
+		app.post(bob, "/logout", nil)
+		app.post(bob, "/login", url.Values{"username": {"bob"}, "password": {"secret"}})
+		if b := pressed(bob); b != 0 {
+			t.Errorf("bob's ticks survived logout: %d", b)
+		}
+	}
 	m := regexp.MustCompile(`http://app\.test(/invite/[\w-]+)`).FindStringSubmatch(app.post(alice, "/g/1/settings/invite", nil))
 	if m == nil {
 		t.Fatal("no invite link")
 	}
-	mustContain(t, app.post(bob, m[1], nil), "Next: S02E05")
+	app.post(bob, m[1], nil)
+	_, bobShows := app.do(bob, "GET", "/g/1/shows", nil)
+	mustContain(t, bobShows, "Severance", "Quiz Night")
 	app.post(bob, "/g/1/sync", nil)
 	_, settings := app.do(bob, "GET", "/g/1/settings", nil)
 	mustContain(t, settings, "<strong>alice</strong>'s Jellyfin account")
@@ -365,6 +390,8 @@ func TestEndToEnd(t *testing.T) {
 			t.Errorf("group should read Jellyfin only as its owner, got %v", app.jf.itemUsers)
 		}
 	})
+
+	checkPresence()
 
 	// Jellyfin going away keeps cached data and shows a notice.
 	app.jf.Close()

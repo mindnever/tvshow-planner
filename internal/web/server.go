@@ -58,7 +58,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /login", s.login)
 	mux.HandleFunc("POST /login/quickconnect", s.startQuickConnect)
 	mux.HandleFunc("GET /login/quickconnect", s.quickConnect)
-	mux.HandleFunc("POST /logout", s.auth.Logout)
+	mux.HandleFunc("POST /logout", s.logout)
 
 	user := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, s.auth.RequireUser(h)) }
 	group := func(pattern string, h groupHandler) { mux.Handle(pattern, s.auth.RequireUser(s.withGroup(h))) }

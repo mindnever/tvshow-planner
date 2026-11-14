@@ -24,7 +24,6 @@ type Person struct {
 	ID      int64
 	GroupID int64
 	Name    string
-	Present bool
 }
 
 type Session struct {

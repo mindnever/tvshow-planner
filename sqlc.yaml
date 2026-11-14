@@ -8,8 +8,6 @@ sql:
         package: sqlcgen
         out: internal/db/sqlcgen
         overrides:
-          - column: people.present
-            go_type: bool
           - column: shows.has_image
             go_type: bool
           - column: shows.archived
