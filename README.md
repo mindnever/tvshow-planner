@@ -36,6 +36,8 @@ make generate   # regenerate the sqlc query code after changing SQL
 
 With Docker, copy `docker-compose.example.yml`, fill in the environment, and `docker compose up -d`.
 
+A GitHub workflow (`.github/workflows/docker.yml`) publishes the image to `ghcr.io/<owner>/tvshow-planner` for amd64, arm64 and armv7: `latest` from the default branch, and version tags from `v*` git tags.
+
 ## Configuration
 
 | Variable | Required | Default | Meaning |
