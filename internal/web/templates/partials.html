@@ -50,14 +50,12 @@
   {{end}}
   {{end}}
 
-  {{if .Linked}}
-  <form method="post" action="/g/{{$g.ID}}/sync" class="refresh"><button class="link">Refresh from Jellyfin</button></form>
-  {{end}}
+  {{if .HasShows}}<form method="post" action="/g/{{$g.ID}}/sync" class="refresh"><button class="ghost">Refresh from Jellyfin</button></form>{{end}}
   {{end}}
 </div>
 {{end}}
 
-{{/* Search results from the linked Jellyfin library. */}}
+{{/* Search results from the group owner's Jellyfin library. */}}
 {{define "library"}}
 {{$g := .Group}}
 {{with .D}}

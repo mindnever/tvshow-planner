@@ -1,0 +1,22 @@
+{{define "title"}}Log in · TV Show Planner{{end}}
+{{define "content"}}
+<div class="auth">
+  <h1>Log in with Jellyfin</h1>
+  <p class="lead">Your password goes straight to Jellyfin and isn't stored here.</p>
+  <form method="post" action="/login" class="stack">
+    <input type="hidden" name="next" value="{{.D.Next}}">
+    <label>Username <input name="username" value="{{.D.Username}}" autocomplete="username" autocapitalize="none" required autofocus {{if .D.BadLogin}}aria-invalid="true" aria-describedby="login-error"{{end}}></label>
+    <label>Password <input name="password" type="password" autocomplete="current-password" {{if .D.BadLogin}}aria-invalid="true" aria-describedby="login-error"{{end}}></label>
+    {{if .D.LoginError}}<p id="login-error" class="field-error" role="alert">{{.D.LoginError}}</p>{{end}}
+    <button>Log in</button>
+  </form>
+
+  <div class="or">or</div>
+
+  <form method="post" action="/login/quickconnect" class="stack">
+    <input type="hidden" name="next" value="{{.D.Next}}">
+    {{if .D.QuickError}}<p class="field-error" role="alert">{{.D.QuickError}}</p>{{end}}
+    <button class="secondary">Use Quick Connect</button>
+  </form>
+</div>
+{{end}}

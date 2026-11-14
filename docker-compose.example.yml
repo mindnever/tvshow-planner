@@ -7,9 +7,7 @@ services:
     environment:
       PUBLIC_BASE_URL: https://tv.example.com
       SECRET_KEY: change-me-to-a-long-random-string
-      OIDC_ISSUER: https://auth.example.com
-      OIDC_CLIENT_ID: tvshow-planner
-      OIDC_CLIENT_SECRET: change-me
+      JELLYFIN_URL: http://jellyfin:8096
     volumes:
       - tvshow-planner-data:/data
 

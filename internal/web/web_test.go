@@ -1,7 +1,6 @@
 package web
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -11,10 +10,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 
 	"tvshow-planner/internal/auth"
-	"tvshow-planner/internal/config"
 	"tvshow-planner/internal/db"
 	"tvshow-planner/internal/secretbox"
 )
@@ -24,31 +23,88 @@ const (
 	andorID     = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa2"
 )
 
-// fakeJellyfin implements just the endpoints the client uses.
-func fakeJellyfin(t *testing.T) *httptest.Server {
+// fakeJellyfin implements just the endpoints the client uses. Any username
+// logs in with the password "secret" and gets the token "tok-<username>".
+type fakeJellyfin struct {
+	*httptest.Server
+	mu          sync.Mutex
+	qcDisabled  bool
+	qcApproved  bool
+	qcForgotten bool
+	itemUsers   map[string]bool // userId values seen on /Items
+}
+
+func (f *fakeJellyfin) set(fn func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	fn()
+}
+
+func newFakeJellyfin(t *testing.T) *fakeJellyfin {
 	type m = map[string]any
+	f := &fakeJellyfin{itemUsers: map[string]bool{}}
 	series := []m{
 		{"Id": severanceID, "Name": "Severance", "ProductionYear": 2022, "ImageTags": m{"Primary": "x"},
 			"UserData": m{"UnplayedItemCount": 3, "LastPlayedDate": "2026-11-01T20:00:00.0000000Z"}},
 		{"Id": andorID, "Name": "Andor", "ProductionYear": 2022,
 			"UserData": m{"UnplayedItemCount": 0}},
 	}
-	authed := func(r *http.Request) bool { return strings.Contains(r.Header.Get("Authorization"), `Token="tok-123"`) }
+	// tokenUser returns the user a request's token belongs to.
+	tokenUser := func(r *http.Request) string {
+		if mt := regexp.MustCompile(`Token="tok-(\w+)"`).FindStringSubmatch(r.Header.Get("Authorization")); mt != nil {
+			return mt[1]
+		}
+		return ""
+	}
+	session := func(w http.ResponseWriter, user string) {
+		json.NewEncoder(w).Encode(m{"AccessToken": "tok-" + user, "User": m{"Id": "uid-" + user, "Name": user}})
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /Users/AuthenticateByName", func(w http.ResponseWriter, r *http.Request) {
 		var in struct{ Username, Pw string }
 		json.NewDecoder(r.Body).Decode(&in)
-		if in.Username != "family" || in.Pw != "secret" {
+		if in.Username == "" || in.Pw != "secret" {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		json.NewEncoder(w).Encode(m{"AccessToken": "tok-123", "User": m{"Id": "user-1", "Name": "family"}})
+		session(w, in.Username)
+	})
+	mux.HandleFunc("POST /QuickConnect/Initiate", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if f.qcDisabled {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		json.NewEncoder(w).Encode(m{"Secret": "qc-secret", "Code": "123456", "Authenticated": false})
+	})
+	mux.HandleFunc("GET /QuickConnect/Connect", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if f.qcForgotten || r.URL.Query().Get("secret") != "qc-secret" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		json.NewEncoder(w).Encode(m{"Authenticated": f.qcApproved})
+	})
+	mux.HandleFunc("POST /Users/AuthenticateWithQuickConnect", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Secret string }
+		json.NewDecoder(r.Body).Decode(&in)
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if in.Secret != "qc-secret" || !f.qcApproved {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		session(w, "carol")
 	})
 	mux.HandleFunc("GET /Items", func(w http.ResponseWriter, r *http.Request) {
-		if !authed(r) || r.URL.Query().Get("userId") != "user-1" {
+		user := tokenUser(r)
+		if user == "" || r.URL.Query().Get("userId") != "uid-"+user {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
+		f.set(func() { f.itemUsers[user] = true })
 		out := []m{}
 		ids := r.URL.Query().Get("Ids")
 		for _, s := range series {
@@ -59,7 +115,7 @@ func fakeJellyfin(t *testing.T) *httptest.Server {
 		json.NewEncoder(w).Encode(m{"Items": out})
 	})
 	mux.HandleFunc("GET /Shows/NextUp", func(w http.ResponseWriter, r *http.Request) {
-		if !authed(r) || r.URL.Query().Get("seriesId") != severanceID {
+		if tokenUser(r) == "" || r.URL.Query().Get("seriesId") != severanceID {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
@@ -69,16 +125,15 @@ func fakeJellyfin(t *testing.T) *httptest.Server {
 		w.Header().Set("Content-Type", "image/png")
 		w.Write([]byte("PNG"))
 	})
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-	return srv
+	f.Server = httptest.NewServer(mux)
+	t.Cleanup(f.Close)
+	return f
 }
 
 type testApp struct {
-	t     *testing.T
-	srv   *httptest.Server
-	store *db.Store
-	auth  *auth.Auth
+	t   *testing.T
+	srv *httptest.Server
+	jf  *fakeJellyfin
 }
 
 func newTestApp(t *testing.T) *testApp {
@@ -87,33 +142,29 @@ func newTestApp(t *testing.T) *testApp {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	a, err := auth.New(context.Background(), config.Config{DevAuthUser: "alice", BaseURL: "http://app.test"}, store)
-	if err != nil {
-		t.Fatal(err)
-	}
+	jf := newFakeJellyfin(t)
 	box, _ := secretbox.New("test-secret-key-0123456789")
-	srv := httptest.NewServer(New(store, a, box, "http://app.test").Handler())
+	srv := httptest.NewServer(New(store, auth.New(store, false), box, "http://app.test", jf.URL).Handler())
 	t.Cleanup(srv.Close)
-	return &testApp{t: t, srv: srv, store: store, auth: a}
+	return &testApp{t: t, srv: srv, jf: jf}
 }
 
-// client returns an HTTP client logged in as the named user.
-func (a *testApp) client(name string) *http.Client {
-	u, err := a.store.UpsertUser(context.Background(), "test", name, name, "")
-	if err != nil {
-		a.t.Fatal(err)
-	}
-	rec := httptest.NewRecorder()
-	if err := a.auth.StartSession(context.Background(), rec, u.ID); err != nil {
-		a.t.Fatal(err)
-	}
+func newClient() *http.Client {
 	jar, _ := cookiejar.New(nil)
-	base, _ := url.Parse(a.srv.URL)
-	jar.SetCookies(base, rec.Result().Cookies())
 	return &http.Client{Jar: jar}
 }
 
-func (a *testApp) do(c *http.Client, method, path string, form url.Values, hdr ...string) (int, string) {
+// client returns an HTTP client logged in as the named Jellyfin user.
+func (a *testApp) client(name string) *http.Client {
+	a.t.Helper()
+	c := newClient()
+	if body := a.post(c, "/login", url.Values{"username": {name}, "password": {"secret"}}); !strings.Contains(body, `class="who">`+name+`<`) {
+		a.t.Fatalf("login as %s did not land on a logged-in page:\n%s", name, body)
+	}
+	return c
+}
+
+func (a *testApp) doH(c *http.Client, method, path string, form url.Values, hdr ...string) (int, string, http.Header) {
 	a.t.Helper()
 	var body io.Reader
 	if form != nil {
@@ -132,7 +183,13 @@ func (a *testApp) do(c *http.Client, method, path string, form url.Values, hdr .
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, string(b)
+	return resp.StatusCode, string(b), resp.Header
+}
+
+func (a *testApp) do(c *http.Client, method, path string, form url.Values, hdr ...string) (int, string) {
+	a.t.Helper()
+	code, body, _ := a.doH(c, method, path, form, hdr...)
+	return code, body
 }
 
 func (a *testApp) post(c *http.Client, path string, form url.Values) string {
@@ -156,27 +213,99 @@ func mustContain(t *testing.T, body string, wants ...string) {
 	}
 }
 
+func TestPasswordLogin(t *testing.T) {
+	app := newTestApp(t)
+	c := newClient()
+
+	// A wrong password is reported next to the button and marks both fields.
+	code, body := app.do(c, "POST", "/login", url.Values{"username": {"alice"}, "password": {"nope"}, "next": {"/g/7"}})
+	if code != http.StatusUnauthorized {
+		t.Fatalf("bad password = %d", code)
+	}
+	mustContain(t, body, "Jellyfin rejected that username or password", `id="login-error"`,
+		`name="username" value="alice" autocomplete="username" autocapitalize="none" required autofocus aria-invalid="true"`,
+		`name="password" type="password" autocomplete="current-password" aria-invalid="true"`,
+		`name="next" value="/g/7"`)
+	if code, _ := app.do(c, "GET", "/", nil); code != http.StatusOK { // still anonymous: lands on the login page
+		t.Fatalf("GET / = %d", code)
+	}
+
+	// Jellyfin being down is not blamed on the fields.
+	app.jf.Close()
+	code, body = app.do(c, "POST", "/login", url.Values{"username": {"alice"}, "password": {"secret"}})
+	if code != http.StatusBadGateway || strings.Contains(body, "aria-invalid") || strings.Contains(body, app.jf.URL) {
+		t.Fatalf("jellyfin down: %d\n%s", code, body)
+	}
+	mustContain(t, body, "reach the Jellyfin server")
+}
+
+func TestLoginRedirectsToNext(t *testing.T) {
+	app := newTestApp(t)
+	app.post(app.client("alice"), "/groups", url.Values{"name": {"Family"}})
+	c := newClient()
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	for next, want := range map[string]string{"/g/1/shows": "/g/1/shows", "//evil.example": "/", "https://evil.example": "/"} {
+		_, _, h := app.doH(c, "POST", "/login", url.Values{"username": {"alice"}, "password": {"secret"}, "next": {next}})
+		if got := h.Get("Location"); got != want {
+			t.Errorf("next=%q redirected to %q, want %q", next, got, want)
+		}
+	}
+}
+
+func TestQuickConnect(t *testing.T) {
+	app := newTestApp(t)
+	c := newClient()
+
+	mustContain(t, app.post(c, "/login/quickconnect", url.Values{"next": {"/"}}), "123456", `hx-get="/login/quickconnect"`)
+
+	// Not approved yet: the poll changes nothing.
+	if code, _, h := app.doH(c, "GET", "/login/quickconnect", nil, "HX-Request", "true"); code != http.StatusNoContent || h.Get("HX-Redirect") != "" {
+		t.Fatalf("pending poll = %d, HX-Redirect %q", code, h.Get("HX-Redirect"))
+	}
+	if code, body := app.do(c, "GET", "/", nil); code != 200 || !strings.Contains(body, "Log in with Jellyfin") {
+		t.Fatalf("logged in before approval:\n%s", body)
+	}
+
+	// Approved in Jellyfin: the next poll logs in and sends the browser on.
+	app.jf.set(func() { app.jf.qcApproved = true })
+	if _, _, h := app.doH(c, "GET", "/login/quickconnect", nil, "HX-Request", "true"); h.Get("HX-Redirect") != "/" {
+		t.Fatalf("approved poll: HX-Redirect %q", h.Get("HX-Redirect"))
+	}
+	_, body := app.do(c, "GET", "/", nil)
+	mustContain(t, body, `class="who">carol<`, "Your groups")
+}
+
+func TestQuickConnectFailures(t *testing.T) {
+	app := newTestApp(t)
+
+	// A code Jellyfin no longer knows sends the user back to start again.
+	c := newClient()
+	app.post(c, "/login/quickconnect", nil)
+	app.jf.set(func() { app.jf.qcForgotten = true })
+	if _, _, h := app.doH(c, "GET", "/login/quickconnect", nil, "HX-Request", "true"); h.Get("HX-Redirect") != "/login?quickconnect=expired" {
+		t.Fatalf("expired poll: HX-Redirect %q", h.Get("HX-Redirect"))
+	}
+	_, body := app.do(c, "GET", "/login?quickconnect=expired", nil)
+	mustContain(t, body, "code expired")
+	// Without a pending request the Quick Connect page goes back to login.
+	_, body = app.do(newClient(), "GET", "/login/quickconnect", nil)
+	mustContain(t, body, "Log in with Jellyfin")
+
+	app.jf.set(func() { app.jf.qcDisabled = true })
+	code, body := app.do(newClient(), "POST", "/login/quickconnect", url.Values{})
+	if code != http.StatusBadRequest {
+		t.Fatalf("disabled quick connect = %d", code)
+	}
+	mustContain(t, body, "Quick Connect is turned off")
+}
+
 func TestEndToEnd(t *testing.T) {
 	app := newTestApp(t)
-	jf := fakeJellyfin(t)
 	alice := app.client("alice")
 
 	app.post(alice, "/groups", url.Values{"name": {"Family"}})
 	for _, n := range []string{"Ana", "Bo", "Cy"} { // person IDs 1, 2, 3
 		app.post(alice, "/g/1/people", url.Values{"name": {n}})
-	}
-
-	// Linking: wrong password is reported, right one stores an encrypted token.
-	link := url.Values{"server_url": {jf.URL}, "username": {"family"}, "password": {"nope"}}
-	if code, body := app.do(alice, "POST", "/g/1/settings/jellyfin", link); code != http.StatusBadRequest ||
-		!strings.Contains(body, "rejected that username or password") {
-		t.Fatalf("bad password: %d\n%s", code, body)
-	}
-	link.Set("password", "secret")
-	mustContain(t, app.post(alice, "/g/1/settings/jellyfin", link), "Linked to <strong>family</strong>")
-	stored, err := app.store.JellyfinLink(context.Background(), 1)
-	if err != nil || strings.Contains(string(stored.TokenEnc), "tok-123") {
-		t.Fatalf("token not stored encrypted: %v %q", err, stored.TokenEnc)
 	}
 
 	_, lib := app.do(alice, "GET", "/g/1/library", nil)
@@ -216,8 +345,24 @@ func TestEndToEnd(t *testing.T) {
 		t.Errorf("image proxy accepted a non-ID: %d", code)
 	}
 
+	// Another manager sees the group through the owner's Jellyfin account.
+	bob := app.client("bob")
+	m := regexp.MustCompile(`http://app\.test(/invite/[\w-]+)`).FindStringSubmatch(app.post(alice, "/g/1/settings/invite", nil))
+	if m == nil {
+		t.Fatal("no invite link")
+	}
+	mustContain(t, app.post(bob, m[1], nil), "Next: S02E05")
+	app.post(bob, "/g/1/sync", nil)
+	_, settings := app.do(bob, "GET", "/g/1/settings", nil)
+	mustContain(t, settings, "<strong>alice</strong>'s Jellyfin account")
+	app.jf.set(func() {
+		if !app.jf.itemUsers["alice"] || app.jf.itemUsers["bob"] {
+			t.Errorf("group should read Jellyfin only as its owner, got %v", app.jf.itemUsers)
+		}
+	})
+
 	// Jellyfin going away keeps cached data and shows a notice.
-	jf.Close()
+	app.jf.Close()
 	mustContain(t, app.post(alice, "/g/1/sync", nil), "Couldn't refresh from Jellyfin", "Next: S02E05")
 }
 
@@ -252,6 +397,12 @@ func TestAccessControlAndInvites(t *testing.T) {
 	app.post(alice, "/g/1/settings/managers/2/remove", nil)
 	if code, _ := app.do(bob, "GET", "/g/1", nil); code != http.StatusForbidden {
 		t.Errorf("removed manager still has access: %d", code)
+	}
+
+	// Logging out ends the session.
+	mustContain(t, app.post(alice, "/logout", nil), "Log in with Jellyfin")
+	if _, body := app.do(alice, "GET", "/g/1", nil); !strings.Contains(body, "Log in with Jellyfin") {
+		t.Errorf("still logged in after logout")
 	}
 }
 

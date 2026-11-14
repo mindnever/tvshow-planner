@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"regexp"
@@ -92,7 +93,6 @@ type plannerView struct {
 	AnyPresent bool
 	Results    []resultView
 	HasShows   bool
-	Linked     bool
 	SyncError  string
 }
 
@@ -110,11 +110,7 @@ func (s *Server) plannerView(ctx context.Context, g db.Group) (plannerView, erro
 	if err != nil {
 		return v, err
 	}
-	if link, err := s.store.JellyfinLink(ctx, g.ID); err == nil {
-		v.Linked, v.SyncError = true, link.LastSyncError
-	} else if !errors.Is(err, db.ErrNotFound) {
-		return v, err
-	}
+	v.SyncError = g.LastSyncError
 
 	v.People = people
 	names := map[int64]string{}
@@ -160,11 +156,13 @@ func (s *Server) plannerView(ctx context.Context, g db.Group) (plannerView, erro
 
 func (s *Server) planner(w http.ResponseWriter, r *http.Request, g db.Group) {
 	// Refresh progress from Jellyfin if the cache is stale. A failure is
-	// recorded on the link and shown as a notice; cached data is still used.
-	if link, err := s.store.JellyfinLink(r.Context(), g.ID); err == nil &&
-		time.Since(time.Unix(link.LastSyncAt, 0)) > syncMaxAge {
+	// recorded on the group and shown as a notice; cached data is still used.
+	if time.Since(time.Unix(g.LastSyncAt, 0)) > syncMaxAge {
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-		_ = s.syncGroup(ctx, g.ID)
+		g.LastSyncError = ""
+		if err := s.syncGroup(ctx, g.ID); err != nil {
+			g.LastSyncError = err.Error()
+		}
 		cancel()
 	}
 	s.renderPlanner(w, r, g, "base")
@@ -255,7 +253,6 @@ type showRow struct {
 type showsView struct {
 	Shows  []showRow
 	People []db.Person
-	Linked bool
 }
 
 func (s *Server) shows(w http.ResponseWriter, r *http.Request, g db.Group) {
@@ -280,9 +277,6 @@ func (s *Server) renderShows(w http.ResponseWriter, r *http.Request, g db.Group,
 		return
 	}
 	v := showsView{People: people}
-	if _, err := s.store.JellyfinLink(ctx, g.ID); err == nil {
-		v.Linked = true
-	}
 	for _, sh := range shows {
 		row := showRow{Show: sh, Watchers: map[int64]bool{}}
 		for _, pid := range watchers[sh.ID] {
@@ -433,30 +427,27 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request, g db.Group) {
 
 type settingsView struct {
 	Managers  []db.Manager
-	Link      *db.JellyfinLink
+	OwnerName string // whose Jellyfin account the group reads
 	InviteURL string
-	ServerURL string // re-filled after a failed link attempt
-	Username  string
 }
 
 func (s *Server) settings(w http.ResponseWriter, r *http.Request, g db.Group) {
-	s.renderSettings(w, r, g, http.StatusOK, "", settingsView{})
+	s.renderSettings(w, r, g, "")
 }
 
-func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, g db.Group, status int, errMsg string, v settingsView) {
-	var err error
-	if v.Managers, err = s.store.ListManagers(r.Context(), g.ID); err != nil {
+func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, g db.Group, inviteURL string) {
+	managers, err := s.store.ListManagers(r.Context(), g.ID)
+	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	link, err := s.store.JellyfinLink(r.Context(), g.ID)
-	if err == nil {
-		v.Link = &link
-	} else if !errors.Is(err, db.ErrNotFound) {
-		s.fail(w, r, err)
-		return
+	v := settingsView{Managers: managers, InviteURL: inviteURL}
+	for _, m := range managers {
+		if m.Role == "owner" {
+			v.OwnerName = m.Name
+		}
 	}
-	s.render(w, r, status, "settings", pageData{Group: &g, Tab: "settings", Error: errMsg, D: v})
+	s.render(w, r, http.StatusOK, "settings", pageData{Group: &g, Tab: "settings", D: v})
 }
 
 func (s *Server) renameGroup(w http.ResponseWriter, r *http.Request, g db.Group) {
@@ -477,47 +468,7 @@ func (s *Server) createInvite(w http.ResponseWriter, r *http.Request, g db.Group
 		s.fail(w, r, err)
 		return
 	}
-	s.renderSettings(w, r, g, http.StatusOK, "", settingsView{InviteURL: s.baseURL + "/invite/" + token})
-}
-
-func (s *Server) linkJellyfin(w http.ResponseWriter, r *http.Request, g db.Group) {
-	ctx := r.Context()
-	v := settingsView{ServerURL: strings.TrimSpace(r.FormValue("server_url")), Username: strings.TrimSpace(r.FormValue("username"))}
-	baseURL, err := jellyfin.NormalizeURL(v.ServerURL)
-	if err != nil {
-		s.renderSettings(w, r, g, http.StatusBadRequest, err.Error(), v)
-		return
-	}
-	dev := make([]byte, 16)
-	rand.Read(dev)
-	deviceID := base64.RawURLEncoding.EncodeToString(dev)
-	c, username, err := jellyfin.Authenticate(ctx, s.hc, baseURL, v.Username, r.FormValue("password"), deviceID)
-	if err != nil {
-		msg := "Could not reach Jellyfin at that address: " + err.Error()
-		if errors.Is(err, jellyfin.ErrBadCredentials) {
-			msg = "Jellyfin rejected that username or password."
-		}
-		s.renderSettings(w, r, g, http.StatusBadRequest, msg, v)
-		return
-	}
-	link := db.JellyfinLink{
-		GroupID: g.ID, ServerURL: baseURL, UserID: c.UserID, Username: username,
-		TokenEnc: s.box.Seal(c.Token), DeviceID: deviceID,
-	}
-	if err := s.store.SaveJellyfinLink(ctx, link, auth.User(ctx).ID); err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	_ = s.syncGroup(ctx, g.ID)
-	redirect(w, r, groupPath(g, "/settings"))
-}
-
-func (s *Server) unlinkJellyfin(w http.ResponseWriter, r *http.Request, g db.Group) {
-	if err := s.store.DeleteJellyfinLink(r.Context(), g.ID); err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	redirect(w, r, groupPath(g, "/settings"))
+	s.renderSettings(w, r, g, s.baseURL+"/invite/"+token)
 }
 
 func (s *Server) ownerOnly(w http.ResponseWriter, r *http.Request, g db.Group) bool {
@@ -552,28 +503,33 @@ func (s *Server) deleteGroup(w http.ResponseWriter, r *http.Request, g db.Group)
 
 // ---- jellyfin sync ----
 
+// jellyfinClient talks to Jellyfin as the group's owner: their library and
+// watched state are what the group sees, whoever is looking at it.
 func (s *Server) jellyfinClient(ctx context.Context, groupID int64) (*jellyfin.Client, error) {
-	link, err := s.store.JellyfinLink(ctx, groupID)
+	cred, err := s.store.OwnerCredentials(ctx, groupID)
 	if err != nil {
-		return nil, errors.New("no Jellyfin account is linked")
+		return nil, err
 	}
-	token, err := s.box.Open(link.TokenEnc)
+	token, err := s.box.Open(cred.TokenEnc)
 	if err != nil {
-		return nil, errors.New("stored Jellyfin token cannot be decrypted (did SECRET_KEY change?); link the account again")
+		return nil, fmt.Errorf("the stored Jellyfin login of %s can't be read (did SECRET_KEY change?); they need to log in again", cred.Name)
 	}
-	return &jellyfin.Client{BaseURL: link.ServerURL, Token: token, UserID: link.UserID, DeviceID: link.DeviceID, HTTP: s.hc}, nil
+	return &jellyfin.Client{BaseURL: s.jellyfinURL, Token: token, UserID: cred.JellyfinUserID, DeviceID: cred.DeviceID, HTTP: s.hc}, nil
 }
 
 // syncGroup refreshes progress and metadata of the group's Jellyfin shows
-// and records the outcome on the link.
+// and records the outcome on the group.
 func (s *Server) syncGroup(ctx context.Context, groupID int64) error {
 	err := s.doSync(ctx, groupID)
 	msg := ""
+	if errors.Is(err, jellyfin.ErrBadCredentials) {
+		err = errors.New("the group owner's Jellyfin login is no longer valid; they need to log in to TV Show Planner again")
+	}
 	if err != nil {
 		msg = err.Error()
 	}
 	// Record the outcome even if the request context has expired.
-	_ = s.store.SetJellyfinSyncStatus(context.WithoutCancel(ctx), groupID, msg)
+	_ = s.store.SetSyncStatus(context.WithoutCancel(ctx), groupID, msg)
 	return err
 }
 

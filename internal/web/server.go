@@ -26,21 +26,22 @@ var templateFS embed.FS
 var staticFS embed.FS
 
 type Server struct {
-	store   *db.Store
-	auth    *auth.Auth
-	box     *secretbox.Box
-	baseURL string
-	hc      *http.Client // for Jellyfin
-	pages   map[string]*template.Template
+	store       *db.Store
+	auth        *auth.Auth
+	box         *secretbox.Box
+	baseURL     string
+	jellyfinURL string       // the one Jellyfin server users log in with
+	hc          *http.Client // for Jellyfin
+	pages       map[string]*template.Template
 }
 
-func New(store *db.Store, a *auth.Auth, box *secretbox.Box, baseURL string) *Server {
+func New(store *db.Store, a *auth.Auth, box *secretbox.Box, baseURL, jellyfinURL string) *Server {
 	s := &Server{
-		store: store, auth: a, box: box, baseURL: baseURL,
+		store: store, auth: a, box: box, baseURL: baseURL, jellyfinURL: jellyfinURL,
 		hc:    &http.Client{Timeout: 15 * time.Second},
 		pages: map[string]*template.Template{},
 	}
-	for _, name := range []string{"home", "planner", "shows", "people", "settings", "invite", "message"} {
+	for _, name := range []string{"home", "planner", "shows", "people", "settings", "invite", "message", "login", "quickconnect"} {
 		s.pages[name] = template.Must(template.New("").Funcs(template.FuncMap{"join": joinNames}).ParseFS(templateFS,
 			"templates/base.html", "templates/partials.html", "templates/"+name+".html"))
 	}
@@ -53,12 +54,11 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok\n")) })
 
-	mux.HandleFunc("GET /login", s.auth.Login)
-	mux.HandleFunc("GET /auth/callback", s.auth.Callback)
+	mux.HandleFunc("GET /login", s.loginPage)
+	mux.HandleFunc("POST /login", s.login)
+	mux.HandleFunc("POST /login/quickconnect", s.startQuickConnect)
+	mux.HandleFunc("GET /login/quickconnect", s.quickConnect)
 	mux.HandleFunc("POST /logout", s.auth.Logout)
-	mux.HandleFunc("GET /logged-out", func(w http.ResponseWriter, r *http.Request) {
-		s.render(w, r, http.StatusOK, "message", pageData{D: "You are logged out."})
-	})
 
 	user := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, s.auth.RequireUser(h)) }
 	group := func(pattern string, h groupHandler) { mux.Handle(pattern, s.auth.RequireUser(s.withGroup(h))) }
@@ -89,8 +89,6 @@ func (s *Server) Handler() http.Handler {
 	group("GET /g/{gid}/settings", s.settings)
 	group("POST /g/{gid}/settings/name", s.renameGroup)
 	group("POST /g/{gid}/settings/invite", s.createInvite)
-	group("POST /g/{gid}/settings/jellyfin", s.linkJellyfin)
-	group("POST /g/{gid}/settings/jellyfin/unlink", s.unlinkJellyfin)
 	group("POST /g/{gid}/settings/managers/{uid}/remove", s.removeManager)
 	group("POST /g/{gid}/settings/delete", s.deleteGroup)
 

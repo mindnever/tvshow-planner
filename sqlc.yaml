@@ -1,0 +1,16 @@
+version: "2"
+sql:
+  - engine: sqlite
+    schema: internal/db/migrations
+    queries: internal/db/queries
+    gen:
+      go:
+        package: sqlcgen
+        out: internal/db/sqlcgen
+        overrides:
+          - column: people.present
+            go_type: bool
+          - column: shows.has_image
+            go_type: bool
+          - column: shows.archived
+            go_type: bool

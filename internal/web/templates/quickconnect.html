@@ -1,0 +1,10 @@
+{{define "title"}}Quick Connect · TV Show Planner{{end}}
+{{define "content"}}
+<div class="auth">
+  <h1>Quick Connect</h1>
+  <p class="lead">In a Jellyfin app where you're already signed in, open <strong>Quick Connect</strong> from the user menu and enter this code.</p>
+  <p class="code" aria-label="Quick Connect code">{{.D}}</p>
+  <p class="empty" hx-get="/login/quickconnect" hx-trigger="every 2s" hx-swap="none">Waiting for you to approve it in Jellyfin…</p>
+  <p class="links"><a href="/login/quickconnect">I've entered the code</a> · <a href="/login">Cancel</a></p>
+</div>
+{{end}}

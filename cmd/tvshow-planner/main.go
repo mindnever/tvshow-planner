@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -42,13 +43,10 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	a, err := auth.New(ctx, cfg, store)
-	if err != nil {
-		return err
-	}
+	a := auth.New(store, strings.HasPrefix(cfg.BaseURL, "https://"))
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           web.New(store, a, box, cfg.BaseURL).Handler(),
+		Handler:           web.New(store, a, box, cfg.BaseURL, cfg.JellyfinURL).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
@@ -57,7 +55,7 @@ func run() error {
 		defer cancel()
 		srv.Shutdown(shutdownCtx)
 	}()
-	slog.Info("listening", "addr", cfg.ListenAddr, "base_url", cfg.BaseURL)
+	slog.Info("listening", "addr", cfg.ListenAddr, "base_url", cfg.BaseURL, "jellyfin", cfg.JellyfinURL)
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

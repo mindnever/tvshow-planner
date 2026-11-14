@@ -3,7 +3,7 @@
 {{if .D}}
 <ul class="rows">
   {{range .D}}
-  <li><a class="grow big" href="/g/{{.ID}}">{{.Name}}</a>{{if not .IsOwner}}<span class="year">shared with you</span>{{end}}</li>
+  <li><a class="grow big" href="/g/{{.ID}}">{{.Name}}</a>{{if not .IsOwner}}<span class="year">shared with you</span>{{end}}<span class="chev" aria-hidden="true">›</span></li>
   {{end}}
 </ul>
 {{else}}

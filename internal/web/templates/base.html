@@ -11,14 +11,16 @@
 </head>
 <body>
 <header class="top">
-  <a class="brand" href="/">TV Show Planner</a>
+  <div class="crumbs">
+    <a class="brand" href="/">TV Show Planner</a>
+    {{with .Group}}<span class="sep">/</span><span class="group-name">{{.Name}}</span>{{end}}
+  </div>
   {{if .User.ID}}
-  <form method="post" action="/logout"><button class="link">Log out {{.User.Name}}</button></form>
+  <form method="post" action="/logout" class="account"><span class="who">{{.User.Name}}</span><button class="ghost">Log out</button></form>
   {{end}}
 </header>
 {{with .Group}}
 <nav class="tabs">
-  <span class="group-name">{{.Name}}</span>
   <a href="/g/{{.ID}}" {{if eq $.Tab "planner"}}aria-current="page"{{end}}>Tonight</a>
   <a href="/g/{{.ID}}/shows" {{if eq $.Tab "shows"}}aria-current="page"{{end}}>Shows</a>
   <a href="/g/{{.ID}}/people" {{if eq $.Tab "people"}}aria-current="page"{{end}}>People</a>

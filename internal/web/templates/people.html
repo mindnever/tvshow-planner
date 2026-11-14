@@ -8,10 +8,10 @@
   <li>
     <form method="post" action="/g/{{$g.ID}}/people/{{.ID}}" class="inline grow">
       <input name="name" value="{{.Name}}" aria-label="Name" required maxlength="100">
-      <button>Rename</button>
+      <button class="ghost">Rename</button>
     </form>
     <form method="post" action="/g/{{$g.ID}}/people/{{.ID}}/delete">
-      <button class="danger" data-confirm="Remove {{.Name}} from the group and from every show?">Remove</button>
+      <button class="ghost danger" data-confirm="Remove {{.Name}} from the group and from every show?">Remove</button>
     </form>
   </li>
   {{end}}

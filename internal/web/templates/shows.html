@@ -4,7 +4,7 @@
 {{$people := .D.People}}
 <h1>Shows</h1>
 {{if not .D.Shows}}
-<p class="empty">No shows yet. Add one below, then tick who watches it together.</p>
+<p class="empty">No shows yet. Add one below, then pick who watches it together.</p>
 {{end}}
 <ul class="cards">
   {{range .D.Shows}}
@@ -13,14 +13,13 @@
     <div class="card-head">
       {{if .Show.HasImage}}<img class="thumb" src="/g/{{$g.ID}}/image/{{.Show.JellyfinID}}" alt="" loading="lazy">{{end}}
       <h2 class="grow">{{.Show.Title}}{{if .Show.Year}} <span class="year">{{.Show.Year}}</span>{{end}}
-        {{if .Show.Archived}}<span class="year">archived</span>{{else if not .Show.JellyfinID}}<span class="year">not in Jellyfin</span>{{end}}</h2>
+        {{if .Show.Archived}}<span class="year">· archived</span>{{else if not .Show.JellyfinID}}<span class="year">· not in Jellyfin</span>{{end}}</h2>
     </div>
     {{if $people}}
-    <form method="post" action="/g/{{$g.ID}}/shows/{{.Show.ID}}/watchers" class="watchers">
+    <form id="watchers-{{.Show.ID}}" method="post" action="/g/{{$g.ID}}/shows/{{.Show.ID}}/watchers" class="pills" aria-label="Who watches {{.Show.Title}}">
       {{range $people}}
-      <label class="check"><input type="checkbox" name="person" value="{{.ID}}" {{if index $row.Watchers .ID}}checked{{end}}> {{.Name}}</label>
+      <label class="pill"><input type="checkbox" name="person" value="{{.ID}}" {{if index $row.Watchers .ID}}checked{{end}}><span>{{.Name}}</span></label>
       {{end}}
-      <button>Save watchers</button>
     </form>
     {{else}}
     <p class="empty"><a href="/g/{{$g.ID}}/people">Add people</a> to choose who watches this.</p>
@@ -28,26 +27,23 @@
     <div class="card-actions">
       <form method="post" action="/g/{{$g.ID}}/shows/{{.Show.ID}}/archive">
         <input type="hidden" name="archived" value="{{if .Show.Archived}}0{{else}}1{{end}}">
-        <button class="link">{{if .Show.Archived}}Restore{{else}}Archive{{end}}</button>
+        <button class="ghost">{{if .Show.Archived}}Restore{{else}}Archive{{end}}</button>
       </form>
       <form method="post" action="/g/{{$g.ID}}/shows/{{.Show.ID}}/delete">
-        <button class="link danger" data-confirm="Delete {{.Show.Title}} from this group?">Delete</button>
+        <button class="ghost danger" data-confirm="Delete {{.Show.Title}} from this group?">Delete</button>
       </form>
+      {{if $people}}<button class="save" form="watchers-{{.Show.ID}}">Save watchers</button>{{end}}
     </div>
   </li>
   {{end}}
 </ul>
 
-{{if .D.Linked}}
 <h2>Add from Jellyfin</h2>
 <input type="search" name="q" placeholder="Search the library" aria-label="Search the Jellyfin library"
        hx-get="/g/{{$g.ID}}/library" hx-trigger="load, input changed delay:300ms" hx-target="#library">
 <div id="library"><p class="empty">Loading…</p></div>
-{{else}}
-<p class="empty"><a href="/g/{{$g.ID}}/settings">Link a Jellyfin account</a> to add shows from your library with posters and watch progress.</p>
-{{end}}
 
-<h2>Add by title</h2>
+<h2>Add a show that isn't in Jellyfin</h2>
 <form method="post" action="/g/{{$g.ID}}/shows" class="inline">
   <input name="title" placeholder="Show title" aria-label="Show title" required maxlength="100">
   <button>Add</button>
