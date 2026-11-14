@@ -315,6 +315,11 @@ func TestEndToEnd(t *testing.T) {
 	app.post(alice, "/g/1/shows", url.Values{"jellyfin_id": {severanceID}})
 	app.post(alice, "/g/1/shows", url.Values{"jellyfin_id": {andorID}})
 	app.post(alice, "/g/1/shows", url.Values{"title": {"Quiz Night"}})
+	// The Shows page lists the most recently added show first.
+	_, page := app.do(alice, "GET", "/g/1/shows", nil)
+	if q, a, s := strings.Index(page, "Quiz Night"), strings.Index(page, "Andor"), strings.Index(page, "Severance"); !(q >= 0 && q < a && a < s) {
+		t.Errorf("shows not newest-first: Quiz Night@%d Andor@%d Severance@%d", q, a, s)
+	}
 	if _, lib := app.do(alice, "GET", "/g/1/library", nil); !strings.Contains(lib, "Nothing to add") {
 		t.Errorf("library should be exhausted:\n%s", lib)
 	}

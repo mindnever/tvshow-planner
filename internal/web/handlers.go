@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -9,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -282,6 +284,8 @@ func (s *Server) renderShows(w http.ResponseWriter, r *http.Request, g db.Group,
 		s.fail(w, r, err)
 		return
 	}
+	// Newest first, so a show that was just added is at the top.
+	slices.SortFunc(shows, func(a, b db.Show) int { return cmp.Compare(b.ID, a.ID) })
 	var v showsView
 	for _, sh := range shows {
 		row := showRow{GroupID: g.ID, Show: sh, People: people, Watchers: map[int64]bool{}}
