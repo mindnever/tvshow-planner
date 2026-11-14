@@ -19,7 +19,7 @@
     <span class="grow">{{.Name}}</span>
     {{if eq .Role "owner"}}<span class="year">owner</span>
     {{else if $g.IsOwner}}
-    <form method="post" action="/g/{{$g.ID}}/settings/managers/{{.UserID}}/remove"><button class="link danger">Remove</button></form>
+    <form method="post" action="/g/{{$g.ID}}/settings/managers/{{.UserID}}/remove"><button class="ghost danger" data-confirm="Remove {{.Name}} from this group? They lose access right away.">Remove</button></form>
     {{end}}
   </li>
   {{end}}

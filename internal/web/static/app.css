@@ -107,7 +107,6 @@ ul.rows input { border-color: transparent; background: var(--raised); }
 
 /* ---- shows ---- */
 .card { padding: .85rem; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); display: grid; gap: .7rem; }
-.card.archived { opacity: .6; }
 .card-head { display: flex; gap: .7rem; align-items: center; }
 .card-head h2 { margin: 0; }
 .pills { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
@@ -121,3 +120,19 @@ ul.rows input { border-color: transparent; background: var(--raised); }
 /* Show "Save watchers" only when a checkbox differs from its saved state
    (the checked attribute is what the server rendered; :checked is the current state). */
 .card:not(:has(.pills input:checked:not([checked]), .pills input[checked]:not(:checked))) .save { visibility: hidden; }
+
+/* ---- collapsible sections ---- */
+.fold { margin: 0 0 1rem; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.fold > summary { display: flex; align-items: center; gap: .5rem; padding: .75rem .9rem; font-weight: 600; cursor: pointer; list-style: none; border-radius: var(--radius); }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::after { content: "›"; margin-left: auto; color: var(--muted); font-size: 1.3rem; line-height: 1; transition: transform .15s; }
+.fold[open] > summary::after { transform: rotate(90deg); }
+.fold-body { display: grid; gap: .75rem; padding: 0 .9rem .9rem; margin: 0; }
+.fold .rows li, .fold .card { background: var(--raised); border-color: transparent; }
+.fold .pill span { background: var(--surface); }
+.fold.archived { margin-top: 1rem; }
+.fold.archived .card { opacity: .75; }
+.count { color: var(--muted); font-weight: 500; font-size: .9rem; }
+/* The library can be long: it scrolls inside its own box instead of pushing the page down. */
+#library { max-height: 19rem; overflow-y: auto; margin: 0; border-radius: .6rem; }
+#library > .empty { margin: 0; padding: .5rem 0; }

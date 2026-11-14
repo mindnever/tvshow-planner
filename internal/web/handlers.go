@@ -245,14 +245,20 @@ func (s *Server) deletePerson(w http.ResponseWriter, r *http.Request, g db.Group
 
 // ---- shows ----
 
+// showRow is one show card; it carries what the card template needs.
 type showRow struct {
+	GroupID  int64
 	Show     db.Show
+	People   []db.Person
 	Watchers map[int64]bool
 }
 
 type showsView struct {
-	Shows  []showRow
-	People []db.Person
+	Active   []showRow
+	Archived []showRow
+	// AddOpen expands the "Add shows" section: when the group has no active
+	// shows yet, or while the user is in the middle of adding some.
+	AddOpen bool
 }
 
 func (s *Server) shows(w http.ResponseWriter, r *http.Request, g db.Group) {
@@ -276,14 +282,19 @@ func (s *Server) renderShows(w http.ResponseWriter, r *http.Request, g db.Group,
 		s.fail(w, r, err)
 		return
 	}
-	v := showsView{People: people}
+	var v showsView
 	for _, sh := range shows {
-		row := showRow{Show: sh, Watchers: map[int64]bool{}}
+		row := showRow{GroupID: g.ID, Show: sh, People: people, Watchers: map[int64]bool{}}
 		for _, pid := range watchers[sh.ID] {
 			row.Watchers[pid] = true
 		}
-		v.Shows = append(v.Shows, row)
+		if sh.Archived {
+			v.Archived = append(v.Archived, row)
+		} else {
+			v.Active = append(v.Active, row)
+		}
 	}
+	v.AddOpen = len(v.Active) == 0 || r.URL.Query().Has("add") || errMsg != ""
 	status := http.StatusOK
 	if errMsg != "" {
 		status = http.StatusBadGateway
@@ -323,7 +334,7 @@ func (s *Server) createShow(w http.ResponseWriter, r *http.Request, g db.Group) 
 			return
 		}
 	}
-	redirect(w, r, groupPath(g, "/shows"))
+	redirect(w, r, groupPath(g, "/shows?add"))
 }
 
 func (s *Server) setWatchers(w http.ResponseWriter, r *http.Request, g db.Group) {

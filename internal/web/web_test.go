@@ -394,7 +394,20 @@ func TestAccessControlAndInvites(t *testing.T) {
 	if code, _ := app.do(bob, "POST", "/g/1/settings/delete", url.Values{}); code != http.StatusForbidden {
 		t.Errorf("manager could delete group: %d", code)
 	}
-	app.post(alice, "/g/1/settings/managers/2/remove", nil)
+	// The owner's settings page offers to remove bob (never the owner); bob's own page offers nothing.
+	const removeBob, removeAlice = `action="/g/1/settings/managers/2/remove"`, `action="/g/1/settings/managers/1/remove"`
+	_, ownerPage := app.do(alice, "GET", "/g/1/settings", nil)
+	mustContain(t, ownerPage, removeBob)
+	_, managerPage := app.do(bob, "GET", "/g/1/settings", nil)
+	if strings.Contains(ownerPage, removeAlice) || strings.Contains(managerPage, "/remove") {
+		t.Errorf("remove buttons shown where they shouldn't be")
+	}
+	if code, _ := app.do(bob, "POST", "/g/1/settings/managers/1/remove", url.Values{}); code != http.StatusForbidden {
+		t.Errorf("manager could remove the owner: %d", code)
+	}
+	if body := app.post(alice, "/g/1/settings/managers/2/remove", nil); strings.Contains(body, ">bob<") {
+		t.Errorf("bob still listed after removal")
+	}
 	if code, _ := app.do(bob, "GET", "/g/1", nil); code != http.StatusForbidden {
 		t.Errorf("removed manager still has access: %d", code)
 	}
