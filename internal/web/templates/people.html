@@ -1,0 +1,28 @@
+{{define "title"}}People · {{.Group.Name}}{{end}}
+{{define "content"}}
+{{$g := .Group}}
+<h1>People</h1>
+{{if .D}}
+<ul class="rows">
+  {{range .D}}
+  <li>
+    <form method="post" action="/g/{{$g.ID}}/people/{{.ID}}" class="inline grow">
+      <input name="name" value="{{.Name}}" aria-label="Name" required maxlength="100">
+      <button>Rename</button>
+    </form>
+    <form method="post" action="/g/{{$g.ID}}/people/{{.ID}}/delete">
+      <button class="danger" data-confirm="Remove {{.Name}} from the group and from every show?">Remove</button>
+    </form>
+  </li>
+  {{end}}
+</ul>
+{{else}}
+<p class="empty">Add everyone who watches shows in this group. They don't need an account.</p>
+{{end}}
+
+<h2>Add a person</h2>
+<form method="post" action="/g/{{$g.ID}}/people" class="inline">
+  <input name="name" placeholder="Name" aria-label="Name" required maxlength="100">
+  <button>Add</button>
+</form>
+{{end}}

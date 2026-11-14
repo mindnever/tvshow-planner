@@ -1,0 +1,33 @@
+{{define "base"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="htmx-config" content='{"includeIndicatorStyles":false}'>
+<title>{{block "title" .}}TV Show Planner{{end}}</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/htmx.min.js" defer></script>
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/">TV Show Planner</a>
+  {{if .User.ID}}
+  <form method="post" action="/logout"><button class="link">Log out {{.User.Name}}</button></form>
+  {{end}}
+</header>
+{{with .Group}}
+<nav class="tabs">
+  <span class="group-name">{{.Name}}</span>
+  <a href="/g/{{.ID}}" {{if eq $.Tab "planner"}}aria-current="page"{{end}}>Tonight</a>
+  <a href="/g/{{.ID}}/shows" {{if eq $.Tab "shows"}}aria-current="page"{{end}}>Shows</a>
+  <a href="/g/{{.ID}}/people" {{if eq $.Tab "people"}}aria-current="page"{{end}}>People</a>
+  <a href="/g/{{.ID}}/settings" {{if eq $.Tab "settings"}}aria-current="page"{{end}}>Settings</a>
+</nav>
+{{end}}
+<main>
+{{if .Error}}<p class="notice error" role="alert">{{.Error}}</p>{{end}}
+{{block "content" .}}{{end}}
+</main>
+</body>
+</html>{{end}}

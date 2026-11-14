@@ -1,0 +1,623 @@
+package web
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"errors"
+	"io"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"tvshow-planner/internal/auth"
+	"tvshow-planner/internal/db"
+	"tvshow-planner/internal/jellyfin"
+	"tvshow-planner/internal/planner"
+)
+
+const (
+	inviteTTL  = 7 * 24 * time.Hour
+	syncMaxAge = 10 * time.Minute
+)
+
+// ---- home, groups, invites ----
+
+func (s *Server) home(w http.ResponseWriter, r *http.Request) {
+	groups, err := s.store.ListGroups(r.Context(), auth.User(r.Context()).ID)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	s.render(w, r, http.StatusOK, "home", pageData{D: groups})
+}
+
+func (s *Server) createGroup(w http.ResponseWriter, r *http.Request) {
+	name := cleanName(r.FormValue("name"))
+	if name == "" {
+		redirect(w, r, "/")
+		return
+	}
+	id, err := s.store.CreateGroup(r.Context(), name, auth.User(r.Context()).ID)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	redirect(w, r, "/g/"+strconv.FormatInt(id, 10)+"/people")
+}
+
+func (s *Server) showInvite(w http.ResponseWriter, r *http.Request) {
+	_, name, err := s.store.Invite(r.Context(), r.PathValue("token"))
+	if errors.Is(err, db.ErrNotFound) {
+		s.render(w, r, http.StatusNotFound, "message", pageData{D: "This invite link is invalid or has expired."})
+		return
+	}
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	s.render(w, r, http.StatusOK, "invite", pageData{D: map[string]string{"Name": name, "Token": r.PathValue("token")}})
+}
+
+func (s *Server) acceptInvite(w http.ResponseWriter, r *http.Request) {
+	gid, _, err := s.store.Invite(r.Context(), r.PathValue("token"))
+	if errors.Is(err, db.ErrNotFound) {
+		s.render(w, r, http.StatusNotFound, "message", pageData{D: "This invite link is invalid or has expired."})
+		return
+	}
+	if err == nil {
+		err = s.store.AddManager(r.Context(), gid, auth.User(r.Context()).ID)
+	}
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	redirect(w, r, "/g/"+strconv.FormatInt(gid, 10))
+}
+
+// ---- planner ----
+
+type resultView struct {
+	Show     db.Show
+	Tier     planner.Tier
+	Missing  []string
+	Extra    []string
+	Finished bool
+}
+
+type plannerView struct {
+	People     []db.Person
+	AnyPresent bool
+	Results    []resultView
+	HasShows   bool
+	Linked     bool
+	SyncError  string
+}
+
+func (s *Server) plannerView(ctx context.Context, g db.Group) (plannerView, error) {
+	var v plannerView
+	people, err := s.store.ListPeople(ctx, g.ID)
+	if err != nil {
+		return v, err
+	}
+	shows, err := s.store.ListShows(ctx, g.ID)
+	if err != nil {
+		return v, err
+	}
+	watchers, err := s.store.Watchers(ctx, g.ID)
+	if err != nil {
+		return v, err
+	}
+	if link, err := s.store.JellyfinLink(ctx, g.ID); err == nil {
+		v.Linked, v.SyncError = true, link.LastSyncError
+	} else if !errors.Is(err, db.ErrNotFound) {
+		return v, err
+	}
+
+	v.People = people
+	names := map[int64]string{}
+	var present []int64
+	for _, p := range people {
+		names[p.ID] = p.Name
+		if p.Present {
+			present = append(present, p.ID)
+		}
+	}
+	v.AnyPresent = len(present) > 0
+
+	byID := map[int64]db.Show{}
+	var candidates []planner.Show
+	for _, sh := range shows {
+		if sh.Archived {
+			continue
+		}
+		v.HasShows = true
+		byID[sh.ID] = sh
+		candidates = append(candidates, planner.Show{
+			ID: sh.ID, Title: sh.Title, Watchers: watchers[sh.ID],
+			// Progress is only known for synced Jellyfin shows.
+			Finished:     sh.JellyfinID != "" && sh.SyncedAt > 0 && sh.Unplayed == 0,
+			LastPlayedAt: sh.LastPlayedAt,
+		})
+	}
+	toNames := func(ids []int64) []string {
+		out := make([]string, len(ids))
+		for i, id := range ids {
+			out[i] = names[id]
+		}
+		return out
+	}
+	for _, res := range planner.Rank(present, candidates) {
+		v.Results = append(v.Results, resultView{
+			Show: byID[res.Show.ID], Tier: res.Tier, Finished: res.Show.Finished,
+			Missing: toNames(res.Missing), Extra: toNames(res.Extra),
+		})
+	}
+	return v, nil
+}
+
+func (s *Server) planner(w http.ResponseWriter, r *http.Request, g db.Group) {
+	// Refresh progress from Jellyfin if the cache is stale. A failure is
+	// recorded on the link and shown as a notice; cached data is still used.
+	if link, err := s.store.JellyfinLink(r.Context(), g.ID); err == nil &&
+		time.Since(time.Unix(link.LastSyncAt, 0)) > syncMaxAge {
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		_ = s.syncGroup(ctx, g.ID)
+		cancel()
+	}
+	s.renderPlanner(w, r, g, "base")
+}
+
+func (s *Server) renderPlanner(w http.ResponseWriter, r *http.Request, g db.Group, tmpl string) {
+	v, err := s.plannerView(r.Context(), g)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	s.exec(w, r, http.StatusOK, "planner", tmpl, pageData{Group: &g, Tab: "planner", D: v})
+}
+
+// afterPresence answers htmx with just the planner fragment, and plain form
+// posts with a redirect.
+func (s *Server) afterPresence(w http.ResponseWriter, r *http.Request, g db.Group, err error) {
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if r.Header.Get("HX-Request") != "" {
+		s.renderPlanner(w, r, g, "planner")
+		return
+	}
+	redirect(w, r, groupPath(g, ""))
+}
+
+func (s *Server) togglePresence(w http.ResponseWriter, r *http.Request, g db.Group) {
+	s.afterPresence(w, r, g, s.store.TogglePresent(r.Context(), g.ID, pathID(r, "pid")))
+}
+
+func (s *Server) clearPresence(w http.ResponseWriter, r *http.Request, g db.Group) {
+	s.afterPresence(w, r, g, s.store.ClearPresence(r.Context(), g.ID))
+}
+
+func (s *Server) syncNow(w http.ResponseWriter, r *http.Request, g db.Group) {
+	_ = s.syncGroup(r.Context(), g.ID) // outcome is shown on the planner page
+	redirect(w, r, groupPath(g, ""))
+}
+
+// ---- people ----
+
+func (s *Server) people(w http.ResponseWriter, r *http.Request, g db.Group) {
+	people, err := s.store.ListPeople(r.Context(), g.ID)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	s.render(w, r, http.StatusOK, "people", pageData{Group: &g, Tab: "people", D: people})
+}
+
+func (s *Server) createPerson(w http.ResponseWriter, r *http.Request, g db.Group) {
+	if name := cleanName(r.FormValue("name")); name != "" {
+		if err := s.store.CreatePerson(r.Context(), g.ID, name); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+	}
+	redirect(w, r, groupPath(g, "/people"))
+}
+
+func (s *Server) renamePerson(w http.ResponseWriter, r *http.Request, g db.Group) {
+	if name := cleanName(r.FormValue("name")); name != "" {
+		if err := s.store.RenamePerson(r.Context(), g.ID, pathID(r, "pid"), name); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+	}
+	redirect(w, r, groupPath(g, "/people"))
+}
+
+func (s *Server) deletePerson(w http.ResponseWriter, r *http.Request, g db.Group) {
+	if err := s.store.DeletePerson(r.Context(), g.ID, pathID(r, "pid")); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	redirect(w, r, groupPath(g, "/people"))
+}
+
+// ---- shows ----
+
+type showRow struct {
+	Show     db.Show
+	Watchers map[int64]bool
+}
+
+type showsView struct {
+	Shows  []showRow
+	People []db.Person
+	Linked bool
+}
+
+func (s *Server) shows(w http.ResponseWriter, r *http.Request, g db.Group) {
+	s.renderShows(w, r, g, "")
+}
+
+func (s *Server) renderShows(w http.ResponseWriter, r *http.Request, g db.Group, errMsg string) {
+	ctx := r.Context()
+	shows, err := s.store.ListShows(ctx, g.ID)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	people, err := s.store.ListPeople(ctx, g.ID)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	watchers, err := s.store.Watchers(ctx, g.ID)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	v := showsView{People: people}
+	if _, err := s.store.JellyfinLink(ctx, g.ID); err == nil {
+		v.Linked = true
+	}
+	for _, sh := range shows {
+		row := showRow{Show: sh, Watchers: map[int64]bool{}}
+		for _, pid := range watchers[sh.ID] {
+			row.Watchers[pid] = true
+		}
+		v.Shows = append(v.Shows, row)
+	}
+	status := http.StatusOK
+	if errMsg != "" {
+		status = http.StatusBadGateway
+	}
+	s.render(w, r, status, "shows", pageData{Group: &g, Tab: "shows", Error: errMsg, D: v})
+}
+
+var jellyfinIDRe = regexp.MustCompile(`^[0-9a-fA-F-]{32,36}$`)
+
+func (s *Server) createShow(w http.ResponseWriter, r *http.Request, g db.Group) {
+	ctx := r.Context()
+	if jfID := r.FormValue("jellyfin_id"); jfID != "" {
+		if !jellyfinIDRe.MatchString(jfID) {
+			http.Error(w, "bad series id", http.StatusBadRequest)
+			return
+		}
+		c, err := s.jellyfinClient(ctx, g.ID)
+		var found []jellyfin.Series
+		if err == nil {
+			found, err = c.ListSeries(ctx, "", []string{jfID}, 1)
+		}
+		if err == nil && len(found) == 0 {
+			err = errors.New("series not found")
+		}
+		if err != nil {
+			s.renderShows(w, r, g, "Could not add the show from Jellyfin: "+err.Error())
+			return
+		}
+		if err := s.store.CreateShow(ctx, g.ID, found[0].ID, found[0].Name); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		_ = s.syncGroup(ctx, g.ID) // fills in progress and poster
+	} else if title := cleanName(r.FormValue("title")); title != "" {
+		if err := s.store.CreateShow(ctx, g.ID, "", title); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+	}
+	redirect(w, r, groupPath(g, "/shows"))
+}
+
+func (s *Server) setWatchers(w http.ResponseWriter, r *http.Request, g db.Group) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	var ids []int64
+	for _, v := range r.PostForm["person"] {
+		if id, err := strconv.ParseInt(v, 10, 64); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	if err := s.store.SetWatchers(r.Context(), g.ID, pathID(r, "sid"), ids); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	redirect(w, r, groupPath(g, "/shows"))
+}
+
+func (s *Server) archiveShow(w http.ResponseWriter, r *http.Request, g db.Group) {
+	if err := s.store.SetShowArchived(r.Context(), g.ID, pathID(r, "sid"), r.FormValue("archived") == "1"); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	redirect(w, r, groupPath(g, "/shows"))
+}
+
+func (s *Server) deleteShow(w http.ResponseWriter, r *http.Request, g db.Group) {
+	if err := s.store.DeleteShow(r.Context(), g.ID, pathID(r, "sid")); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	redirect(w, r, groupPath(g, "/shows"))
+}
+
+type libraryView struct {
+	Series []jellyfin.Series
+	Error  string
+}
+
+// library is an htmx fragment: Jellyfin series not yet added to the group.
+func (s *Server) library(w http.ResponseWriter, r *http.Request, g db.Group) {
+	ctx := r.Context()
+	var v libraryView
+	c, err := s.jellyfinClient(ctx, g.ID)
+	var all []jellyfin.Series
+	if err == nil {
+		all, err = c.ListSeries(ctx, strings.TrimSpace(r.URL.Query().Get("q")), nil, 60)
+	}
+	if err != nil {
+		v.Error = "Could not load the Jellyfin library: " + err.Error()
+	} else {
+		shows, err := s.store.ListShows(ctx, g.ID)
+		if err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		added := map[string]bool{}
+		for _, sh := range shows {
+			added[sh.JellyfinID] = true
+		}
+		for _, sr := range all {
+			if !added[sr.ID] {
+				v.Series = append(v.Series, sr)
+			}
+		}
+	}
+	s.exec(w, r, http.StatusOK, "shows", "library", pageData{Group: &g, D: v})
+}
+
+// image proxies a poster so browsers never talk to Jellyfin directly.
+func (s *Server) image(w http.ResponseWriter, r *http.Request, g db.Group) {
+	item := r.PathValue("item")
+	if !jellyfinIDRe.MatchString(item) {
+		http.NotFound(w, r)
+		return
+	}
+	c, err := s.jellyfinClient(r.Context(), g.ID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	resp, err := c.Image(r.Context(), item)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer resp.Body.Close()
+	ct := resp.Header.Get("Content-Type")
+	if !strings.HasPrefix(ct, "image/") || strings.HasPrefix(ct, "image/svg") {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	io.Copy(w, io.LimitReader(resp.Body, 5<<20))
+}
+
+// ---- settings ----
+
+type settingsView struct {
+	Managers  []db.Manager
+	Link      *db.JellyfinLink
+	InviteURL string
+	ServerURL string // re-filled after a failed link attempt
+	Username  string
+}
+
+func (s *Server) settings(w http.ResponseWriter, r *http.Request, g db.Group) {
+	s.renderSettings(w, r, g, http.StatusOK, "", settingsView{})
+}
+
+func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, g db.Group, status int, errMsg string, v settingsView) {
+	var err error
+	if v.Managers, err = s.store.ListManagers(r.Context(), g.ID); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	link, err := s.store.JellyfinLink(r.Context(), g.ID)
+	if err == nil {
+		v.Link = &link
+	} else if !errors.Is(err, db.ErrNotFound) {
+		s.fail(w, r, err)
+		return
+	}
+	s.render(w, r, status, "settings", pageData{Group: &g, Tab: "settings", Error: errMsg, D: v})
+}
+
+func (s *Server) renameGroup(w http.ResponseWriter, r *http.Request, g db.Group) {
+	if name := cleanName(r.FormValue("name")); name != "" {
+		if err := s.store.RenameGroup(r.Context(), g.ID, name); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+	}
+	redirect(w, r, groupPath(g, "/settings"))
+}
+
+func (s *Server) createInvite(w http.ResponseWriter, r *http.Request, g db.Group) {
+	b := make([]byte, 24)
+	rand.Read(b)
+	token := base64.RawURLEncoding.EncodeToString(b)
+	if err := s.store.CreateInvite(r.Context(), token, g.ID, time.Now().Add(inviteTTL)); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	s.renderSettings(w, r, g, http.StatusOK, "", settingsView{InviteURL: s.baseURL + "/invite/" + token})
+}
+
+func (s *Server) linkJellyfin(w http.ResponseWriter, r *http.Request, g db.Group) {
+	ctx := r.Context()
+	v := settingsView{ServerURL: strings.TrimSpace(r.FormValue("server_url")), Username: strings.TrimSpace(r.FormValue("username"))}
+	baseURL, err := jellyfin.NormalizeURL(v.ServerURL)
+	if err != nil {
+		s.renderSettings(w, r, g, http.StatusBadRequest, err.Error(), v)
+		return
+	}
+	dev := make([]byte, 16)
+	rand.Read(dev)
+	deviceID := base64.RawURLEncoding.EncodeToString(dev)
+	c, username, err := jellyfin.Authenticate(ctx, s.hc, baseURL, v.Username, r.FormValue("password"), deviceID)
+	if err != nil {
+		msg := "Could not reach Jellyfin at that address: " + err.Error()
+		if errors.Is(err, jellyfin.ErrBadCredentials) {
+			msg = "Jellyfin rejected that username or password."
+		}
+		s.renderSettings(w, r, g, http.StatusBadRequest, msg, v)
+		return
+	}
+	link := db.JellyfinLink{
+		GroupID: g.ID, ServerURL: baseURL, UserID: c.UserID, Username: username,
+		TokenEnc: s.box.Seal(c.Token), DeviceID: deviceID,
+	}
+	if err := s.store.SaveJellyfinLink(ctx, link, auth.User(ctx).ID); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	_ = s.syncGroup(ctx, g.ID)
+	redirect(w, r, groupPath(g, "/settings"))
+}
+
+func (s *Server) unlinkJellyfin(w http.ResponseWriter, r *http.Request, g db.Group) {
+	if err := s.store.DeleteJellyfinLink(r.Context(), g.ID); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	redirect(w, r, groupPath(g, "/settings"))
+}
+
+func (s *Server) ownerOnly(w http.ResponseWriter, r *http.Request, g db.Group) bool {
+	if g.IsOwner() {
+		return true
+	}
+	s.render(w, r, http.StatusForbidden, "message", pageData{Group: &g, D: "Only the group owner can do that."})
+	return false
+}
+
+func (s *Server) removeManager(w http.ResponseWriter, r *http.Request, g db.Group) {
+	if !s.ownerOnly(w, r, g) {
+		return
+	}
+	if err := s.store.RemoveManager(r.Context(), g.ID, pathID(r, "uid")); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	redirect(w, r, groupPath(g, "/settings"))
+}
+
+func (s *Server) deleteGroup(w http.ResponseWriter, r *http.Request, g db.Group) {
+	if !s.ownerOnly(w, r, g) {
+		return
+	}
+	if err := s.store.DeleteGroup(r.Context(), g.ID); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	redirect(w, r, "/")
+}
+
+// ---- jellyfin sync ----
+
+func (s *Server) jellyfinClient(ctx context.Context, groupID int64) (*jellyfin.Client, error) {
+	link, err := s.store.JellyfinLink(ctx, groupID)
+	if err != nil {
+		return nil, errors.New("no Jellyfin account is linked")
+	}
+	token, err := s.box.Open(link.TokenEnc)
+	if err != nil {
+		return nil, errors.New("stored Jellyfin token cannot be decrypted (did SECRET_KEY change?); link the account again")
+	}
+	return &jellyfin.Client{BaseURL: link.ServerURL, Token: token, UserID: link.UserID, DeviceID: link.DeviceID, HTTP: s.hc}, nil
+}
+
+// syncGroup refreshes progress and metadata of the group's Jellyfin shows
+// and records the outcome on the link.
+func (s *Server) syncGroup(ctx context.Context, groupID int64) error {
+	err := s.doSync(ctx, groupID)
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+	}
+	// Record the outcome even if the request context has expired.
+	_ = s.store.SetJellyfinSyncStatus(context.WithoutCancel(ctx), groupID, msg)
+	return err
+}
+
+func (s *Server) doSync(ctx context.Context, groupID int64) error {
+	c, err := s.jellyfinClient(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	shows, err := s.store.ListShows(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for _, sh := range shows {
+		if sh.JellyfinID != "" {
+			ids = append(ids, sh.JellyfinID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	series, err := c.ListSeries(ctx, "", ids, 0)
+	if err != nil {
+		return err
+	}
+	byID := map[string]jellyfin.Series{}
+	for _, sr := range series {
+		byID[sr.ID] = sr
+	}
+	for _, sh := range shows {
+		sr, ok := byID[sh.JellyfinID]
+		if !ok {
+			continue // manual show, or removed from Jellyfin: keep what we have
+		}
+		sh.Title, sh.Year, sh.HasImage = sr.Name, sr.Year, sr.HasImage
+		sh.Unplayed, sh.LastPlayedAt, sh.NextUp = sr.Unplayed, sr.LastPlayedAt, ""
+		if sr.Unplayed > 0 && !sh.Archived {
+			if sh.NextUp, err = c.NextUp(ctx, sr.ID); err != nil {
+				return err
+			}
+		}
+		if err := s.store.UpdateShowSync(ctx, sh); err != nil {
+			return err
+		}
+	}
+	return nil
+}

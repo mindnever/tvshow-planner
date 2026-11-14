@@ -1,0 +1,5 @@
+{{define "content"}}
+<h1>Join {{.D.Name}}?</h1>
+<p>You've been invited to help manage this group: its people, shows and who's watching tonight.</p>
+<form method="post" action="/invite/{{.D.Token}}"><button>Join group</button></form>
+{{end}}

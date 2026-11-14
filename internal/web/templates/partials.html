@@ -1,0 +1,81 @@
+{{/* The planner fragment is swapped by htmx whenever presence changes. */}}
+{{define "planner"}}
+<div id="planner">
+  {{$g := .Group}}
+  {{with .D}}
+  {{if not .People}}
+  <p class="empty">No people yet. <a href="/g/{{$g.ID}}/people">Add the people in this group</a> to get started.</p>
+  {{else}}
+  <h1>Who's here?</h1>
+  <div class="chips">
+    {{range .People}}
+    <form method="post" action="/g/{{$g.ID}}/presence/{{.ID}}" hx-post="/g/{{$g.ID}}/presence/{{.ID}}" hx-target="#planner" hx-swap="outerHTML">
+      <button class="chip" aria-pressed="{{if .Present}}true{{else}}false{{end}}">{{.Name}}</button>
+    </form>
+    {{end}}
+    {{if .AnyPresent}}
+    <form method="post" action="/g/{{$g.ID}}/presence/clear" hx-post="/g/{{$g.ID}}/presence/clear" hx-target="#planner" hx-swap="outerHTML">
+      <button class="link">Clear</button>
+    </form>
+    {{end}}
+  </div>
+
+  {{if .SyncError}}
+  <p class="notice">Couldn't refresh from Jellyfin, so progress may be out of date. <span class="detail">{{.SyncError}}</span></p>
+  {{end}}
+
+  {{if not .HasShows}}
+  <p class="empty">No shows yet. <a href="/g/{{$g.ID}}/shows">Add shows and pick who watches them.</a></p>
+  {{else if not .AnyPresent}}
+  <p class="empty">Tap everyone who is here to see what you can watch.</p>
+  {{else if not .Results}}
+  <p class="empty">Nobody here follows a show yet. <a href="/g/{{$g.ID}}/shows">Assign watchers to shows.</a></p>
+  {{else}}
+  <ul class="results">
+    {{range .Results}}
+    <li class="result tier-{{.Tier}}{{if .Finished}} finished{{end}}">
+      {{if .Show.HasImage}}<img class="poster" src="/g/{{$g.ID}}/image/{{.Show.JellyfinID}}" alt="" loading="lazy">{{else}}<div class="poster blank"></div>{{end}}
+      <div class="info">
+        <h2>{{.Show.Title}}{{if .Show.Year}} <span class="year">{{.Show.Year}}</span>{{end}}</h2>
+        {{if eq .Tier 1}}<p class="badge good">Everyone's here</p>
+        {{else if eq .Tier 2}}<p class="badge ok">Ready · {{join .Extra}} {{if eq (len .Extra) 1}}doesn't{{else}}don't{{end}} follow it</p>
+        {{else}}<p class="badge warn">Missing {{join .Missing}}</p>{{end}}
+        {{if .Finished}}<p class="next">All caught up</p>
+        {{else if .Show.NextUp}}<p class="next">Next: {{.Show.NextUp}}</p>
+        {{else if .Show.Unplayed}}<p class="next">{{.Show.Unplayed}} unwatched</p>{{end}}
+      </div>
+    </li>
+    {{end}}
+  </ul>
+  {{end}}
+  {{end}}
+
+  {{if .Linked}}
+  <form method="post" action="/g/{{$g.ID}}/sync" class="refresh"><button class="link">Refresh from Jellyfin</button></form>
+  {{end}}
+  {{end}}
+</div>
+{{end}}
+
+{{/* Search results from the linked Jellyfin library. */}}
+{{define "library"}}
+{{$g := .Group}}
+{{with .D}}
+{{if .Error}}<p class="notice error">{{.Error}}</p>
+{{else if not .Series}}<p class="empty">Nothing to add.</p>
+{{else}}
+<ul class="rows">
+  {{range .Series}}
+  <li>
+    {{if .HasImage}}<img class="thumb" src="/g/{{$g.ID}}/image/{{.ID}}" alt="" loading="lazy">{{else}}<div class="thumb blank"></div>{{end}}
+    <span class="grow">{{.Name}}{{if .Year}} <span class="year">{{.Year}}</span>{{end}}</span>
+    <form method="post" action="/g/{{$g.ID}}/shows">
+      <input type="hidden" name="jellyfin_id" value="{{.ID}}">
+      <button>Add</button>
+    </form>
+  </li>
+  {{end}}
+</ul>
+{{end}}
+{{end}}
+{{end}}

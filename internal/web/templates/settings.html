@@ -1,0 +1,53 @@
+{{define "title"}}Settings · {{.Group.Name}}{{end}}
+{{define "content"}}
+{{$g := .Group}}
+<h1>Settings</h1>
+
+<h2>Group name</h2>
+<form method="post" action="/g/{{$g.ID}}/settings/name" class="inline">
+  <input name="name" value="{{$g.Name}}" aria-label="Group name" required maxlength="100">
+  <button>Rename</button>
+</form>
+
+<h2>Jellyfin</h2>
+{{with .D.Link}}
+<p>Linked to <strong>{{.Username}}</strong> on {{.ServerURL}}.</p>
+{{if .LastSyncError}}<p class="notice">Last refresh failed. <span class="detail">{{.LastSyncError}}</span></p>{{end}}
+<form method="post" action="/g/{{$g.ID}}/settings/jellyfin/unlink">
+  <button class="danger" data-confirm="Unlink this Jellyfin account? Shows stay, but progress stops updating.">Unlink</button>
+</form>
+{{else}}
+<p>Link one Jellyfin account to this group. Shows, posters and watched progress come from it. Your password is used once to sign in and is not stored.</p>
+<form method="post" action="/g/{{$g.ID}}/settings/jellyfin" class="stack">
+  <label>Server address <input name="server_url" type="url" placeholder="https://jellyfin.example.com" value="{{$.D.ServerURL}}" required></label>
+  <label>Username <input name="username" value="{{$.D.Username}}" autocomplete="off" required></label>
+  <label>Password <input name="password" type="password" autocomplete="off"></label>
+  <button>Link account</button>
+</form>
+{{end}}
+
+<h2>Who can manage this group</h2>
+<ul class="rows">
+  {{range .D.Managers}}
+  <li>
+    <span class="grow">{{.Name}}{{if .Email}} <span class="year">{{.Email}}</span>{{end}}</span>
+    {{if eq .Role "owner"}}<span class="year">owner</span>
+    {{else if $g.IsOwner}}
+    <form method="post" action="/g/{{$g.ID}}/settings/managers/{{.UserID}}/remove"><button class="link danger">Remove</button></form>
+    {{end}}
+  </li>
+  {{end}}
+</ul>
+{{if .D.InviteURL}}
+<p class="notice">Send this link to the person you want to share the group with. It works for 7 days.<br><code>{{.D.InviteURL}}</code></p>
+{{else}}
+<form method="post" action="/g/{{$g.ID}}/settings/invite"><button>Create invite link</button></form>
+{{end}}
+
+{{if $g.IsOwner}}
+<h2>Delete group</h2>
+<form method="post" action="/g/{{$g.ID}}/settings/delete">
+  <button class="danger" data-confirm="Delete {{$g.Name}} with all its people and shows? This can't be undone.">Delete this group</button>
+</form>
+{{end}}
+{{end}}

@@ -1,0 +1,18 @@
+{{define "content"}}
+<h1>Your groups</h1>
+{{if .D}}
+<ul class="rows">
+  {{range .D}}
+  <li><a class="grow big" href="/g/{{.ID}}">{{.Name}}</a>{{if not .IsOwner}}<span class="year">shared with you</span>{{end}}</li>
+  {{end}}
+</ul>
+{{else}}
+<p class="empty">You don't manage any groups yet. Create one below, or open an invite link someone sent you.</p>
+{{end}}
+
+<h2>New group</h2>
+<form method="post" action="/groups" class="inline">
+  <input name="name" placeholder="Family, Friends from work…" aria-label="Group name" required maxlength="100">
+  <button>Create</button>
+</form>
+{{end}}
