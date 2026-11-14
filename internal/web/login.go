@@ -70,7 +70,7 @@ func (s *Server) completeLogin(w http.ResponseWriter, r *http.Request, c *jellyf
 	if err != nil {
 		return err
 	}
-	return s.auth.StartSession(r.Context(), w, u.ID)
+	return s.auth.StartSession(w, r, u.ID)
 }
 
 // startQuickConnect asks Jellyfin for a code and shows it to the user.
@@ -90,7 +90,7 @@ func (s *Server) startQuickConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state := url.Values{"secret": {qc.Secret}, "code": {qc.Code}, "device": {deviceID}, "next": {v.Next}}
-	s.auth.SetCookie(w, quickConnectCookie, base64.RawURLEncoding.EncodeToString([]byte(state.Encode())), 600)
+	s.auth.SetCookie(w, r, quickConnectCookie, base64.RawURLEncoding.EncodeToString([]byte(state.Encode())), 600)
 	redirect(w, r, "/login/quickconnect")
 }
 
@@ -100,7 +100,7 @@ func (s *Server) startQuickConnect(w http.ResponseWriter, r *http.Request) {
 func (s *Server) quickConnect(w http.ResponseWriter, r *http.Request) {
 	htmx := r.Header.Get("HX-Request") != ""
 	leave := func(to string) {
-		s.auth.SetCookie(w, quickConnectCookie, "", -1)
+		s.auth.SetCookie(w, r, quickConnectCookie, "", -1)
 		if htmx {
 			w.Header().Set("HX-Redirect", to)
 			return

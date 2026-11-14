@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -43,7 +42,7 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	a := auth.New(store, strings.HasPrefix(cfg.BaseURL, "https://"))
+	a := auth.New(store)
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           web.New(store, a, box, cfg.BaseURL, cfg.JellyfinURL).Handler(),

@@ -44,7 +44,7 @@ A GitHub workflow (`.github/workflows/docker.yml`) publishes the image to `ghcr.
 |---|---|---|---|
 | `JELLYFIN_URL` | yes | | Address of the Jellyfin server, as reachable from this app, e.g. `http://jellyfin:8096` |
 | `SECRET_KEY` | yes | | At least 16 characters. Encrypts the stored Jellyfin tokens; changing it means everyone logs in again. |
-| `PUBLIC_BASE_URL` | yes in production | `http://localhost:8080` | Public URL of the app; used for invite links, and cookies are marked Secure when it is https |
+| `PUBLIC_BASE_URL` | yes in production | `http://localhost:8080` | Public URL of the app, used for invite links |
 | `DATABASE_PATH` | no | `tvshow-planner.db` | SQLite file (`/data/tvshow-planner.db` in the Docker image) |
 | `LISTEN_ADDR` | no | `:8080` | |
 
@@ -59,3 +59,7 @@ internal/planner     ranking logic (pure, unit-tested)
 internal/jellyfin    Jellyfin API client (login, Quick Connect, library)
 internal/web         handlers, templates, static assets (htmx)
 ```
+
+## License
+
+[MIT](LICENSE) © Vladimir Zidar. The bundled htmx (`internal/web/static/htmx.min.js`) is under its own license, Zero-Clause BSD.

@@ -144,7 +144,7 @@ func newTestApp(t *testing.T) *testApp {
 	t.Cleanup(func() { store.Close() })
 	jf := newFakeJellyfin(t)
 	box, _ := secretbox.New("test-secret-key-0123456789")
-	srv := httptest.NewServer(New(store, auth.New(store, false), box, "http://app.test", jf.URL).Handler())
+	srv := httptest.NewServer(New(store, auth.New(store), box, "http://app.test", jf.URL).Handler())
 	t.Cleanup(srv.Close)
 	return &testApp{t: t, srv: srv, jf: jf}
 }
@@ -403,6 +403,27 @@ func TestAccessControlAndInvites(t *testing.T) {
 	mustContain(t, app.post(alice, "/logout", nil), "Log in with Jellyfin")
 	if _, body := app.do(alice, "GET", "/g/1", nil); !strings.Contains(body, "Log in with Jellyfin") {
 		t.Errorf("still logged in after logout")
+	}
+}
+
+// Cookies must be usable over plain HTTP, and Secure behind a TLS proxy.
+func TestCookieSecureFollowsRequestScheme(t *testing.T) {
+	app := newTestApp(t)
+	c := newClient()
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	form := url.Values{"username": {"alice"}, "password": {"secret"}}
+
+	_, _, h := app.doH(c, "POST", "/login", form)
+	if ck := h.Get("Set-Cookie"); !strings.HasPrefix(ck, "session=") || strings.Contains(ck, "Secure") {
+		t.Errorf("plain HTTP login cookie = %q, want a non-Secure session cookie", ck)
+	}
+	_, _, h = app.doH(c, "POST", "/login", form, "X-Forwarded-Proto", "https")
+	if ck := h.Get("Set-Cookie"); !strings.Contains(ck, "Secure") {
+		t.Errorf("HTTPS-proxied login cookie = %q, want Secure", ck)
+	}
+	_, _, h = app.doH(c, "POST", "/login/quickconnect", url.Values{})
+	if ck := h.Get("Set-Cookie"); !strings.HasPrefix(ck, "quickconnect=") || strings.Contains(ck, "Secure") {
+		t.Errorf("plain HTTP quick connect cookie = %q", ck)
 	}
 }
 

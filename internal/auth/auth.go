@@ -24,12 +24,17 @@ const (
 )
 
 type Auth struct {
-	store  *db.Store
-	secure bool // set the Secure flag on cookies
+	store *db.Store
 }
 
-func New(store *db.Store, secureCookies bool) *Auth {
-	return &Auth{store: store, secure: secureCookies}
+func New(store *db.Store) *Auth {
+	return &Auth{store: store}
+}
+
+// isHTTPS reports whether the browser reached us over HTTPS, either directly
+// or through a TLS-terminating reverse proxy.
+func isHTTPS(r *http.Request) bool {
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
 // RandomToken returns 32 random bytes, URL-safe encoded.
@@ -52,21 +57,24 @@ func SafeNext(next string) string {
 	return next
 }
 
-// SetCookie sets an HttpOnly cookie; maxAge < 0 deletes it.
-func (a *Auth) SetCookie(w http.ResponseWriter, name, value string, maxAge int) {
+// SetCookie sets an HttpOnly cookie; maxAge < 0 deletes it. The cookie is
+// marked Secure only when the request came over HTTPS: a Secure cookie set
+// over plain HTTP is silently dropped by browsers, which would make login
+// impossible on an HTTP-only deployment.
+func (a *Auth) SetCookie(w http.ResponseWriter, r *http.Request, name, value string, maxAge int) {
 	http.SetCookie(w, &http.Cookie{
 		Name: name, Value: value, Path: "/", MaxAge: maxAge,
-		HttpOnly: true, Secure: a.secure, SameSite: http.SameSiteLaxMode,
+		HttpOnly: true, Secure: isHTTPS(r), SameSite: http.SameSiteLaxMode,
 	})
 }
 
 // StartSession creates a session for userID and sets its cookie.
-func (a *Auth) StartSession(ctx context.Context, w http.ResponseWriter, userID int64) error {
+func (a *Auth) StartSession(w http.ResponseWriter, r *http.Request, userID int64) error {
 	token := RandomToken()
-	if err := a.store.CreateSession(ctx, hashToken(token), userID, time.Now().Add(sessionTTL)); err != nil {
+	if err := a.store.CreateSession(r.Context(), hashToken(token), userID, time.Now().Add(sessionTTL)); err != nil {
 		return err
 	}
-	a.SetCookie(w, sessionCookie, token, int(sessionTTL.Seconds()))
+	a.SetCookie(w, r, sessionCookie, token, int(sessionTTL.Seconds()))
 	return nil
 }
 
@@ -76,7 +84,7 @@ func (a *Auth) Logout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(sessionCookie); err == nil {
 		_ = a.store.DeleteSession(r.Context(), hashToken(c.Value))
 	}
-	a.SetCookie(w, sessionCookie, "", -1)
+	a.SetCookie(w, r, sessionCookie, "", -1)
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
