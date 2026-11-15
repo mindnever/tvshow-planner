@@ -5,7 +5,10 @@ INSERT INTO users (jellyfin_user_id, name, access_token_enc, device_id)
 VALUES (?, ?, ?, ?)
 ON CONFLICT (jellyfin_user_id) DO UPDATE SET
     name = excluded.name, access_token_enc = excluded.access_token_enc, device_id = excluded.device_id
-RETURNING id, name;
+RETURNING id, name, theme;
+
+-- name: SetUserTheme :exec
+UPDATE users SET theme = ? WHERE id = ?;
 
 -- name: GetUserJellyfinID :one
 SELECT jellyfin_user_id FROM users WHERE id = ?;
@@ -14,7 +17,7 @@ SELECT jellyfin_user_id FROM users WHERE id = ?;
 INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?);
 
 -- name: GetSessionUser :one
-SELECT u.id, u.name FROM sessions s JOIN users u ON u.id = s.user_id
+SELECT u.id, u.name, u.theme FROM sessions s JOIN users u ON u.id = s.user_id
 WHERE s.id = sqlc.arg(id) AND s.expires_at > sqlc.arg(now);
 
 -- name: DeleteSession :exec

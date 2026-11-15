@@ -63,6 +63,7 @@ type User struct {
 	AccessTokenEnc []byte
 	DeviceID       string
 	CreatedAt      int64
+	Theme          string
 }
 
 type WatchGroup struct {

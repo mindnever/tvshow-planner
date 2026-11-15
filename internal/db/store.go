@@ -84,6 +84,18 @@ func (s *Store) inTx(ctx context.Context, fn func(q *sqlcgen.Queries) error) err
 type User struct {
 	ID   int64
 	Name string
+	// Theme is the colour scheme the user picked: "light", "dark", or ""
+	// to follow their device.
+	Theme string
+}
+
+// SetUserTheme stores the user's colour scheme; anything but "light" or
+// "dark" means following the device.
+func (s *Store) SetUserTheme(ctx context.Context, userID int64, theme string) error {
+	if theme != "light" && theme != "dark" {
+		theme = ""
+	}
+	return s.q.SetUserTheme(ctx, sqlcgen.SetUserThemeParams{Theme: theme, ID: userID})
 }
 
 // Credentials are what is needed to call Jellyfin as a user.

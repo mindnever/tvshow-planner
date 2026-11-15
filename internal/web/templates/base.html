@@ -1,5 +1,5 @@
 {{define "base"}}<!doctype html>
-<html lang="en">
+<html lang="en"{{if .User.Theme}} data-theme="{{.User.Theme}}"{{end}}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -16,7 +16,19 @@
     {{with .Group}}<span class="sep">/</span><span class="group-name">{{.Name}}</span>{{end}}
   </div>
   {{if .User.ID}}
-  <form method="post" action="/logout" class="account"><span class="who">{{.User.Name}}</span><button class="ghost">Log out</button></form>
+  <div class="account">
+    <span class="who">{{.User.Name}}</span>
+    {{/* One button that goes round: follow the device, light, dark. */}}
+    <form method="post" action="/theme">
+      <input type="hidden" name="theme" value="{{nextTheme .User.Theme}}">
+      <input type="hidden" name="next" value="{{.Here}}">
+      <button class="ghost theme" title="Colour scheme" aria-label="Colour scheme: {{if .User.Theme}}{{.User.Theme}}{{else}}same as this device{{end}}. Switch to {{if eq (nextTheme .User.Theme) "auto"}}same as this device{{else}}{{nextTheme .User.Theme}}{{end}}.">
+        <span class="icon" aria-hidden="true">{{if eq .User.Theme "light"}}☀︎{{else if eq .User.Theme "dark"}}☾{{else}}◐{{end}}</span>
+        <span class="label">{{if eq .User.Theme "light"}}Light{{else if eq .User.Theme "dark"}}Dark{{else}}Auto{{end}}</span>
+      </button>
+    </form>
+    <form method="post" action="/logout"><button class="ghost">Log out</button></form>
+  </div>
   {{end}}
 </header>
 {{with .Group}}

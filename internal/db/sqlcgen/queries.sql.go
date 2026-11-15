@@ -310,7 +310,7 @@ func (q *Queries) GetInvite(ctx context.Context, arg GetInviteParams) (GetInvite
 }
 
 const getSessionUser = `-- name: GetSessionUser :one
-SELECT u.id, u.name FROM sessions s JOIN users u ON u.id = s.user_id
+SELECT u.id, u.name, u.theme FROM sessions s JOIN users u ON u.id = s.user_id
 WHERE s.id = ?1 AND s.expires_at > ?2
 `
 
@@ -320,14 +320,15 @@ type GetSessionUserParams struct {
 }
 
 type GetSessionUserRow struct {
-	ID   int64
-	Name string
+	ID    int64
+	Name  string
+	Theme string
 }
 
 func (q *Queries) GetSessionUser(ctx context.Context, arg GetSessionUserParams) (GetSessionUserRow, error) {
 	row := q.db.QueryRowContext(ctx, getSessionUser, arg.ID, arg.Now)
 	var i GetSessionUserRow
-	err := row.Scan(&i.ID, &i.Name)
+	err := row.Scan(&i.ID, &i.Name, &i.Theme)
 	return i, err
 }
 
@@ -670,6 +671,20 @@ func (q *Queries) SetShowWatchOn(ctx context.Context, arg SetShowWatchOnParams) 
 	return err
 }
 
+const setUserTheme = `-- name: SetUserTheme :exec
+UPDATE users SET theme = ? WHERE id = ?
+`
+
+type SetUserThemeParams struct {
+	Theme string
+	ID    int64
+}
+
+func (q *Queries) SetUserTheme(ctx context.Context, arg SetUserThemeParams) error {
+	_, err := q.db.ExecContext(ctx, setUserTheme, arg.Theme, arg.ID)
+	return err
+}
+
 const updateShowSync = `-- name: UpdateShowSync :exec
 UPDATE shows SET title = ?, year = ?, has_image = ?, unplayed_count = ?, next_up = ?,
     last_played_at = ?, synced_at = ?
@@ -707,7 +722,7 @@ INSERT INTO users (jellyfin_user_id, name, access_token_enc, device_id)
 VALUES (?, ?, ?, ?)
 ON CONFLICT (jellyfin_user_id) DO UPDATE SET
     name = excluded.name, access_token_enc = excluded.access_token_enc, device_id = excluded.device_id
-RETURNING id, name
+RETURNING id, name, theme
 `
 
 type UpsertUserParams struct {
@@ -718,8 +733,9 @@ type UpsertUserParams struct {
 }
 
 type UpsertUserRow struct {
-	ID   int64
-	Name string
+	ID    int64
+	Name  string
+	Theme string
 }
 
 // ---- users & sessions ----
@@ -731,6 +747,6 @@ func (q *Queries) UpsertUser(ctx context.Context, arg UpsertUserParams) (UpsertU
 		arg.DeviceID,
 	)
 	var i UpsertUserRow
-	err := row.Scan(&i.ID, &i.Name)
+	err := row.Scan(&i.ID, &i.Name, &i.Theme)
 	return i, err
 }

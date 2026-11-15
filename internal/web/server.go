@@ -76,7 +76,7 @@ func New(store *db.Store, a *auth.Auth, box *secretbox.Box, baseURL, jellyfinURL
 	}
 	for _, name := range []string{"home", "planner", "shows", "people", "settings", "invite", "message", "login", "quickconnect"} {
 		s.pages[name] = template.Must(template.New("").Funcs(template.FuncMap{
-			"join": joinNames, "jellyfinName": s.serverName, "awaiting": awaiting, "status": availabilityLabel, "requestable": seerr.Requestable,
+			"join": joinNames, "nextTheme": nextTheme, "jellyfinName": s.serverName, "awaiting": awaiting, "status": availabilityLabel, "requestable": seerr.Requestable,
 		}).ParseFS(templateFS,
 			"templates/base.html", "templates/partials.html", "templates/"+name+".html"))
 	}
@@ -94,6 +94,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /login/quickconnect", s.startQuickConnect)
 	mux.HandleFunc("GET /login/quickconnect", s.quickConnect)
 	mux.HandleFunc("POST /logout", s.logout)
+	mux.Handle("POST /theme", s.auth.RequireUser(http.HandlerFunc(s.setTheme)))
 
 	user := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, s.auth.RequireUser(h)) }
 	group := func(pattern string, h groupHandler) { mux.Handle(pattern, s.auth.RequireUser(s.withGroup(h))) }
@@ -147,13 +148,37 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
+// nextTheme is the colour scheme the header button switches to: the three
+// choices go round in a circle.
+func nextTheme(current string) string {
+	switch current {
+	case "":
+		return "light"
+	case "light":
+		return "dark"
+	}
+	return "auto"
+}
+
+// setTheme stores the colour scheme for the account, so it follows the user
+// to every browser they log in from.
+func (s *Server) setTheme(w http.ResponseWriter, r *http.Request) {
+	if err := s.store.SetUserTheme(r.Context(), auth.User(r.Context()).ID, r.FormValue("theme")); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	redirect(w, r, auth.SafeNext(r.FormValue("next")))
+}
+
 // pageData is what every template receives.
 type pageData struct {
 	User  db.User
 	Group *db.Group // nil outside a group
 	Tab   string
 	Error string
-	D     any
+	// Here is where to come back to after an action in the page header.
+	Here string
+	D    any
 }
 
 func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, page string, data pageData) {
@@ -164,6 +189,11 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, page
 // half-written page.
 func (s *Server) exec(w http.ResponseWriter, r *http.Request, status int, page, tmpl string, data pageData) {
 	data.User = auth.User(r.Context())
+	if data.Here = "/"; r.Method == http.MethodGet {
+		data.Here = r.URL.RequestURI()
+	} else if data.Group != nil {
+		data.Here = groupPath(*data.Group, "")
+	}
 	var buf bytes.Buffer
 	if err := s.pages[page].ExecuteTemplate(&buf, tmpl, data); err != nil {
 		s.fail(w, r, err)

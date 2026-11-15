@@ -6,14 +6,24 @@
   --radius: .75rem;
   color-scheme: light dark;
 }
+/* Dark: when the device asks for it, unless the user picked light... */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #131417; --surface: #1d1f24; --raised: #272a31; --text: #ededee; --muted: #a2a6af; --line: #32353d;
     --accent: #93a4ff; --accent-text: #0f1220; --accent-soft: #272c4a;
     --good: #72d590; --good-soft: #1b3324; --ok: #e6c558; --ok-soft: #352e15; --warn: #f3a07b; --warn-soft: #3b231a;
     --danger: #f58f87;
   }
 }
+/* ...or when the user picked dark. (Same values as above.) */
+:root[data-theme="dark"] {
+    --bg: #131417; --surface: #1d1f24; --raised: #272a31; --text: #ededee; --muted: #a2a6af; --line: #32353d;
+    --accent: #93a4ff; --accent-text: #0f1220; --accent-soft: #272c4a;
+    --good: #72d590; --good-soft: #1b3324; --ok: #e6c558; --ok-soft: #352e15; --warn: #f3a07b; --warn-soft: #3b231a;
+    --danger: #f58f87;
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-text-size-adjust: 100%; }
@@ -39,7 +49,11 @@ main > .empty, #planner > .empty { text-align: center; text-wrap: balance; paddi
 .brand { font-weight: 700; text-decoration: none; color: var(--text); }
 .sep { color: var(--muted); }
 .group-name { overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-weight: 600; }
-.account { display: flex; align-items: center; gap: .5rem; flex: none; }
+.account { display: flex; align-items: center; gap: .25rem; flex: none; }
+.account .who { margin-right: .25rem; }
+button.theme { display: inline-flex; align-items: center; gap: .35rem; color: var(--muted); }
+button.theme .icon { font-size: 1.1rem; line-height: 1; }
+@media (max-width: 30rem) { button.theme .label { display: none; } }
 .who { color: var(--muted); font-size: .9rem; }
 @media (max-width: 30rem) { .who { display: none; } }
 .tabs { display: flex; justify-content: center; gap: .25rem; padding: .4rem .75rem; background: var(--surface); border-bottom: 1px solid var(--line); }
