@@ -44,6 +44,10 @@ type Show struct {
 	LastPlayedAt     int64
 	SyncedAt         int64
 	Archived         bool
+	TmdbID           sql.NullInt64
+	PosterPath       string
+	Availability     int64
+	MatchTried       bool
 }
 
 type ShowWatcher struct {

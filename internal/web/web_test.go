@@ -16,6 +16,7 @@ import (
 	"tvshow-planner/internal/auth"
 	"tvshow-planner/internal/db"
 	"tvshow-planner/internal/secretbox"
+	"tvshow-planner/internal/seerr"
 )
 
 const (
@@ -31,7 +32,8 @@ type fakeJellyfin struct {
 	qcDisabled  bool
 	qcApproved  bool
 	qcForgotten bool
-	itemUsers   map[string]bool // userId values seen on /Items
+	itemUsers   map[string]bool  // userId values seen on /Items
+	extra       []map[string]any // series added to the library during a test
 }
 
 func (f *fakeJellyfin) set(fn func()) {
@@ -106,17 +108,24 @@ func newFakeJellyfin(t *testing.T) *fakeJellyfin {
 		}
 		f.set(func() { f.itemUsers[user] = true })
 		out := []m{}
-		ids := r.URL.Query().Get("Ids")
-		for _, s := range series {
-			if ids == "" || strings.Contains(ids, s["Id"].(string)) {
+		ids, term := r.URL.Query().Get("Ids"), strings.ToLower(r.URL.Query().Get("SearchTerm"))
+		f.mu.Lock()
+		all := append(append([]m{}, series...), f.extra...)
+		f.mu.Unlock()
+		for _, s := range all {
+			if (ids == "" || strings.Contains(ids, s["Id"].(string))) && strings.Contains(strings.ToLower(s["Name"].(string)), term) {
 				out = append(out, s)
 			}
 		}
 		json.NewEncoder(w).Encode(m{"Items": out})
 	})
 	mux.HandleFunc("GET /Shows/NextUp", func(w http.ResponseWriter, r *http.Request) {
-		if tokenUser(r) == "" || r.URL.Query().Get("seriesId") != severanceID {
+		if tokenUser(r) == "" {
 			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if r.URL.Query().Get("seriesId") != severanceID {
+			json.NewEncoder(w).Encode(m{"Items": []m{}})
 			return
 		}
 		json.NewEncoder(w).Encode(m{"Items": []m{{"Name": "Trojan's Horse", "ParentIndexNumber": 2, "IndexNumber": 5}}})
@@ -134,9 +143,12 @@ type testApp struct {
 	t   *testing.T
 	srv *httptest.Server
 	jf  *fakeJellyfin
+	js  *fakeSeerr // nil unless started with Jellyseerr
 }
 
-func newTestApp(t *testing.T) *testApp {
+func newTestApp(t *testing.T) *testApp { return startTestApp(t, false) }
+
+func startTestApp(t *testing.T, withSeerr bool) *testApp {
 	store, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -144,9 +156,15 @@ func newTestApp(t *testing.T) *testApp {
 	t.Cleanup(func() { store.Close() })
 	jf := newFakeJellyfin(t)
 	box, _ := secretbox.New("test-secret-key-0123456789")
-	srv := httptest.NewServer(New(store, auth.New(store), box, "http://app.test", jf.URL).Handler())
+	var js *fakeSeerr
+	var sc *seerr.Client
+	if withSeerr {
+		js = newFakeSeerr(t)
+		sc = &seerr.Client{BaseURL: js.URL, APIKey: "key", PosterBase: js.URL + "/poster"}
+	}
+	srv := httptest.NewServer(New(store, auth.New(store), box, "http://app.test", jf.URL, sc).Handler())
 	t.Cleanup(srv.Close)
-	return &testApp{t: t, srv: srv, jf: jf}
+	return &testApp{t: t, srv: srv, jf: jf, js: js}
 }
 
 func newClient() *http.Client {

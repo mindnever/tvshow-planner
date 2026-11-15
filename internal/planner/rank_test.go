@@ -58,11 +58,13 @@ func TestRankTieBreaks(t *testing.T) {
 		{ID: 3, Title: "Recent", Watchers: all, LastPlayedAt: 500},
 		{ID: 4, Title: "beta", Watchers: all},
 		{ID: 5, Title: "Alpha", Watchers: all},
+		// Can't be watched yet: after everything else in its tier.
+		{ID: 8, Title: "Aaa Coming", Watchers: all, Unavailable: true},
 		// Tier wins over everything else: finished exact beats unfinished partial.
 		{ID: 6, Title: "MissingTwo", Watchers: []int64{ana, cy, di}, LastPlayedAt: 999},
 		{ID: 7, Title: "MissingOne", Watchers: []int64{ana, bo, cy}},
 	}
-	want := []string{"Recent", "Older", "Alpha", "beta", "Finished", "MissingOne", "MissingTwo"}
+	want := []string{"Recent", "Older", "Alpha", "beta", "Finished", "Aaa Coming", "MissingOne", "MissingTwo"}
 	if got := titles(Rank(all, shows)); !slices.Equal(got, want) {
 		t.Fatalf("order = %v, want %v", got, want)
 	}

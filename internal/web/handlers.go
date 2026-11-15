@@ -19,6 +19,7 @@ import (
 	"tvshow-planner/internal/db"
 	"tvshow-planner/internal/jellyfin"
 	"tvshow-planner/internal/planner"
+	"tvshow-planner/internal/seerr"
 )
 
 const (
@@ -147,6 +148,7 @@ func (s *Server) plannerView(ctx context.Context, g db.Group, here map[int64]boo
 			// Progress is only known for synced Jellyfin shows.
 			Finished:     sh.JellyfinID != "" && sh.SyncedAt > 0 && sh.Unplayed == 0,
 			LastPlayedAt: sh.LastPlayedAt,
+			Unavailable:  awaiting(sh),
 		})
 	}
 	toNames := func(ids []int64) []string {
@@ -272,6 +274,8 @@ type showRow struct {
 	Show     db.Show
 	People   []db.Person
 	Watchers map[int64]bool
+	// Catalogue is set when Jellyseerr is configured.
+	Catalogue bool
 }
 
 type showsView struct {
@@ -280,6 +284,8 @@ type showsView struct {
 	// AddOpen expands the "Add shows" section: when the group has no active
 	// shows yet, or while the user is in the middle of adding some.
 	AddOpen bool
+	// Catalogue is set when Jellyseerr is configured.
+	Catalogue bool
 }
 
 func (s *Server) shows(w http.ResponseWriter, r *http.Request, g db.Group) {
@@ -305,9 +311,9 @@ func (s *Server) renderShows(w http.ResponseWriter, r *http.Request, g db.Group,
 	}
 	// Newest first, so a show that was just added is at the top.
 	slices.SortFunc(shows, func(a, b db.Show) int { return cmp.Compare(b.ID, a.ID) })
-	var v showsView
+	v := showsView{Catalogue: s.seerr != nil}
 	for _, sh := range shows {
-		row := showRow{GroupID: g.ID, Show: sh, People: people, Watchers: map[int64]bool{}}
+		row := showRow{GroupID: g.ID, Show: sh, People: people, Watchers: map[int64]bool{}, Catalogue: v.Catalogue}
 		for _, pid := range watchers[sh.ID] {
 			row.Watchers[pid] = true
 		}
@@ -346,13 +352,37 @@ func (s *Server) createShow(w http.ResponseWriter, r *http.Request, g db.Group) 
 			s.renderShows(w, r, g, "Could not add the show from Jellyfin: "+err.Error())
 			return
 		}
-		if err := s.store.CreateShow(ctx, g.ID, found[0].ID, found[0].Name); err != nil {
+		if err := s.store.CreateShow(ctx, g.ID, db.Show{JellyfinID: found[0].ID, Title: found[0].Name}); err != nil {
 			s.fail(w, r, err)
 			return
 		}
 		_ = s.syncGroup(ctx, g.ID) // fills in progress and poster
+	} else if raw := r.FormValue("tmdb_id"); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || id <= 0 || s.seerr == nil {
+			http.Error(w, "bad show id", http.StatusBadRequest)
+			return
+		}
+		info, err := s.seerr.Show(ctx, id)
+		if err != nil {
+			s.renderShows(w, r, g, "Could not add the show from Jellyseerr: "+err.Error())
+			return
+		}
+		if err := s.store.CreateShow(ctx, g.ID, db.Show{
+			Title: info.Title, TMDBID: info.TMDBID, Year: info.Year, PosterPath: info.PosterPath, Availability: info.Status,
+		}); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		if r.FormValue("request") == "1" && info.Requestable() {
+			if msg := s.request(ctx, id); msg != "" {
+				s.renderShows(w, r, g, "The show was added, but not requested. "+msg)
+				return
+			}
+		}
+		_ = s.syncGroup(ctx, g.ID) // picks up its status, and links it if it is in Jellyfin after all
 	} else if title := cleanName(r.FormValue("title")); title != "" {
-		if err := s.store.CreateShow(ctx, g.ID, "", title); err != nil {
+		if err := s.store.CreateShow(ctx, g.ID, db.Show{Title: title}); err != nil {
 			s.fail(w, r, err)
 			return
 		}
@@ -397,32 +427,51 @@ func (s *Server) deleteShow(w http.ResponseWriter, r *http.Request, g db.Group) 
 type libraryView struct {
 	Series []jellyfin.Series
 	Error  string
+	// From Jellyseerr: shows matching the search that aren't in Jellyfin.
+	Catalogue      []seerr.Show
+	CatalogueError string
+	// Query is the search text, offered as a title to add as it is.
+	Query string
 }
 
 // library is an htmx fragment: Jellyfin series not yet added to the group.
 func (s *Server) library(w http.ResponseWriter, r *http.Request, g db.Group) {
 	ctx := r.Context()
-	var v libraryView
+	q := cleanName(r.URL.Query().Get("q"))
+	v := libraryView{Query: q}
+	shows, err := s.store.ListShows(ctx, g.ID)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	added, addedTMDB := map[string]bool{}, map[int64]bool{}
+	for _, sh := range shows {
+		added[sh.JellyfinID], addedTMDB[sh.TMDBID] = true, true
+	}
 	c, err := s.jellyfinClient(ctx, g.ID)
 	var all []jellyfin.Series
 	if err == nil {
-		all, err = c.ListSeries(ctx, strings.TrimSpace(r.URL.Query().Get("q")), nil, 60)
+		all, err = c.ListSeries(ctx, q, nil, 60)
 	}
 	if err != nil {
 		v.Error = "Could not load the Jellyfin library: " + err.Error()
-	} else {
-		shows, err := s.store.ListShows(ctx, g.ID)
+	}
+	for _, sr := range all {
+		if !added[sr.ID] {
+			v.Series = append(v.Series, sr)
+		}
+		added[sr.ID] = true // listed above, or already in the group
+	}
+	// The whole catalogue is only worth showing for a specific search.
+	if s.seerr != nil && q != "" {
+		found, err := s.seerr.Search(ctx, q)
 		if err != nil {
-			s.fail(w, r, err)
-			return
+			v.CatalogueError = "Could not search Jellyseerr: " + err.Error()
 		}
-		added := map[string]bool{}
-		for _, sh := range shows {
-			added[sh.JellyfinID] = true
-		}
-		for _, sr := range all {
-			if !added[sr.ID] {
-				v.Series = append(v.Series, sr)
+		for _, sh := range found {
+			inLibrary := sh.JellyfinID != "" && added[sh.JellyfinID]
+			if !addedTMDB[sh.TMDBID] && !inLibrary && len(v.Catalogue) < 20 {
+				v.Catalogue = append(v.Catalogue, sh)
 			}
 		}
 	}
@@ -446,6 +495,11 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request, g db.Group) {
 		http.NotFound(w, r)
 		return
 	}
+	serveImage(w, r, resp)
+}
+
+// serveImage passes on an image fetched from another server, and closes it.
+func serveImage(w http.ResponseWriter, r *http.Request, resp *http.Response) {
 	defer resp.Body.Close()
 	ct := resp.Header.Get("Content-Type")
 	if !strings.HasPrefix(ct, "image/") || strings.HasPrefix(ct, "image/svg") {
@@ -574,6 +628,9 @@ func (s *Server) doSync(ctx context.Context, groupID int64) error {
 	}
 	shows, err := s.store.ListShows(ctx, groupID)
 	if err != nil {
+		return err
+	}
+	if err := s.resolveUnlinked(ctx, c, groupID, shows); err != nil {
 		return err
 	}
 	var ids []string

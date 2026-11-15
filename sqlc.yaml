@@ -12,3 +12,5 @@ sql:
             go_type: bool
           - column: shows.archived
             go_type: bool
+          - column: shows.match_tried
+            go_type: bool

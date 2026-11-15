@@ -8,6 +8,9 @@ services:
       PUBLIC_BASE_URL: https://tv.example.com
       SECRET_KEY: change-me-to-a-long-random-string
       JELLYFIN_URL: http://jellyfin:8096
+      # Optional: find and request shows that aren't in Jellyfin yet.
+      # JELLYSEERR_URL: http://jellyseerr:5055
+      # JELLYSEERR_API_KEY: from-jellyseerr-settings
     volumes:
       - tvshow-planner-data:/data
 

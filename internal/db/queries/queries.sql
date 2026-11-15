@@ -7,6 +7,9 @@ ON CONFLICT (jellyfin_user_id) DO UPDATE SET
     name = excluded.name, access_token_enc = excluded.access_token_enc, device_id = excluded.device_id
 RETURNING id, name;
 
+-- name: GetUserJellyfinID :one
+SELECT jellyfin_user_id FROM users WHERE id = ?;
+
 -- name: CreateSession :exec
 INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?);
 
@@ -89,8 +92,23 @@ DELETE FROM people WHERE id = ? AND group_id = ?;
 SELECT * FROM shows WHERE group_id = ? ORDER BY archived, title COLLATE NOCASE, id;
 
 -- name: CreateShow :exec
-INSERT INTO shows (group_id, jellyfin_series_id, title) VALUES (?, ?, ?)
-ON CONFLICT (group_id, jellyfin_series_id) DO NOTHING;
+INSERT INTO shows (group_id, jellyfin_series_id, title, tmdb_id, year, poster_path, availability)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT DO NOTHING;
+
+-- SetShowCatalogue ties a show to its Jellyseerr (TMDB) entry.
+-- name: SetShowCatalogue :exec
+UPDATE shows SET tmdb_id = ?, title = ?, year = ?, poster_path = ?, availability = ?, match_tried = 1
+WHERE id = ? AND group_id = ?;
+
+-- name: SetShowAvailability :exec
+UPDATE shows SET availability = ? WHERE id = ?;
+
+-- name: SetShowMatchTried :exec
+UPDATE shows SET match_tried = 1 WHERE id = ?;
+
+-- name: LinkShowToJellyfin :exec
+UPDATE shows SET jellyfin_series_id = ? WHERE id = ?;
 
 -- name: SetShowArchived :exec
 UPDATE shows SET archived = ? WHERE id = ? AND group_id = ?;

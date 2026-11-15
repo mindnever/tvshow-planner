@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/pressly/goose/v3"
@@ -99,6 +100,12 @@ func (s *Store) UpsertUser(ctx context.Context, c Credentials) (User, error) {
 		JellyfinUserID: c.JellyfinUserID, Name: c.Name, AccessTokenEnc: c.TokenEnc, DeviceID: c.DeviceID,
 	})
 	return User(u), err
+}
+
+// JellyfinUserID returns the Jellyfin account a user logs in with.
+func (s *Store) JellyfinUserID(ctx context.Context, userID int64) (string, error) {
+	id, err := s.q.GetUserJellyfinID(ctx, userID)
+	return id, notFound(err)
 }
 
 func (s *Store) CreateSession(ctx context.Context, id string, userID int64, expires time.Time) error {
@@ -232,7 +239,7 @@ func (s *Store) DeletePerson(ctx context.Context, groupID, personID int64) error
 
 type Show struct {
 	ID           int64
-	JellyfinID   string // empty for manually entered shows
+	JellyfinID   string // empty until the show is in Jellyfin
 	Title        string
 	Year         int
 	HasImage     bool
@@ -241,7 +248,15 @@ type Show struct {
 	LastPlayedAt int64
 	SyncedAt     int64
 	Archived     bool
+	// From Jellyseerr, for shows added from its catalogue.
+	TMDBID       int64  // 0 for a typed title that hasn't been matched
+	PosterPath   string // TMDB poster, e.g. "/abc.jpg"
+	Availability int    // Jellyseerr's status, see package seerr
+	MatchTried   bool   // the typed title was looked up in Jellyseerr already
 }
+
+// PosterFile is PosterPath without its leading slash, for use in a URL.
+func (s Show) PosterFile() string { return strings.TrimPrefix(s.PosterPath, "/") }
 
 func (s *Store) ListShows(ctx context.Context, groupID int64) ([]Show, error) {
 	rows, err := s.q.ListShows(ctx, groupID)
@@ -251,18 +266,49 @@ func (s *Store) ListShows(ctx context.Context, groupID int64) ([]Show, error) {
 			ID: r.ID, JellyfinID: r.JellyfinSeriesID.String, Title: r.Title, Year: int(r.Year),
 			HasImage: r.HasImage, Unplayed: int(r.UnplayedCount), NextUp: r.NextUp,
 			LastPlayedAt: r.LastPlayedAt, SyncedAt: r.SyncedAt, Archived: r.Archived,
+			TMDBID: r.TmdbID.Int64, PosterPath: r.PosterPath, Availability: int(r.Availability),
+			MatchTried: r.MatchTried,
 		}
 	}
 	return out, err
 }
 
-// CreateShow adds a show; jellyfinID may be empty for a manual entry. Adding
-// the same Jellyfin series twice is a no-op.
-func (s *Store) CreateShow(ctx context.Context, groupID int64, jellyfinID, title string) error {
+// CreateShow adds a show from its JellyfinID, TMDBID or just a Title; the
+// catalogue fields (Year, PosterPath, Availability) are stored too. Adding a
+// Jellyfin series or a catalogue show the group already has is a no-op.
+func (s *Store) CreateShow(ctx context.Context, groupID int64, sh Show) error {
 	return s.q.CreateShow(ctx, sqlcgen.CreateShowParams{
 		GroupID:          groupID,
-		JellyfinSeriesID: sql.NullString{String: jellyfinID, Valid: jellyfinID != ""},
-		Title:            title,
+		JellyfinSeriesID: sql.NullString{String: sh.JellyfinID, Valid: sh.JellyfinID != ""},
+		Title:            sh.Title,
+		TmdbID:           sql.NullInt64{Int64: sh.TMDBID, Valid: sh.TMDBID != 0},
+		Year:             int64(sh.Year),
+		PosterPath:       sh.PosterPath,
+		Availability:     int64(sh.Availability),
+	})
+}
+
+// SetShowCatalogue ties an existing show to its Jellyseerr entry, taking
+// TMDBID, Title, Year, PosterPath and Availability from sh.
+func (s *Store) SetShowCatalogue(ctx context.Context, groupID int64, sh Show) error {
+	return s.q.SetShowCatalogue(ctx, sqlcgen.SetShowCatalogueParams{
+		TmdbID: sql.NullInt64{Int64: sh.TMDBID, Valid: true}, Title: sh.Title, Year: int64(sh.Year),
+		PosterPath: sh.PosterPath, Availability: int64(sh.Availability), ID: sh.ID, GroupID: groupID,
+	})
+}
+
+func (s *Store) SetShowAvailability(ctx context.Context, showID int64, availability int) error {
+	return s.q.SetShowAvailability(ctx, sqlcgen.SetShowAvailabilityParams{Availability: int64(availability), ID: showID})
+}
+
+func (s *Store) SetShowMatchTried(ctx context.Context, showID int64) error {
+	return s.q.SetShowMatchTried(ctx, showID)
+}
+
+// LinkShowToJellyfin records that the show now exists in Jellyfin.
+func (s *Store) LinkShowToJellyfin(ctx context.Context, showID int64, jellyfinID string) error {
+	return s.q.LinkShowToJellyfin(ctx, sqlcgen.LinkShowToJellyfinParams{
+		JellyfinSeriesID: sql.NullString{String: jellyfinID, Valid: true}, ID: showID,
 	})
 }
 

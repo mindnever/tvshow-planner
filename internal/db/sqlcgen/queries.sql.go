@@ -119,18 +119,31 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) er
 }
 
 const createShow = `-- name: CreateShow :exec
-INSERT INTO shows (group_id, jellyfin_series_id, title) VALUES (?, ?, ?)
-ON CONFLICT (group_id, jellyfin_series_id) DO NOTHING
+INSERT INTO shows (group_id, jellyfin_series_id, title, tmdb_id, year, poster_path, availability)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT DO NOTHING
 `
 
 type CreateShowParams struct {
 	GroupID          int64
 	JellyfinSeriesID sql.NullString
 	Title            string
+	TmdbID           sql.NullInt64
+	Year             int64
+	PosterPath       string
+	Availability     int64
 }
 
 func (q *Queries) CreateShow(ctx context.Context, arg CreateShowParams) error {
-	_, err := q.db.ExecContext(ctx, createShow, arg.GroupID, arg.JellyfinSeriesID, arg.Title)
+	_, err := q.db.ExecContext(ctx, createShow,
+		arg.GroupID,
+		arg.JellyfinSeriesID,
+		arg.Title,
+		arg.TmdbID,
+		arg.Year,
+		arg.PosterPath,
+		arg.Availability,
+	)
 	return err
 }
 
@@ -318,6 +331,31 @@ func (q *Queries) GetSessionUser(ctx context.Context, arg GetSessionUserParams) 
 	return i, err
 }
 
+const getUserJellyfinID = `-- name: GetUserJellyfinID :one
+SELECT jellyfin_user_id FROM users WHERE id = ?
+`
+
+func (q *Queries) GetUserJellyfinID(ctx context.Context, id int64) (string, error) {
+	row := q.db.QueryRowContext(ctx, getUserJellyfinID, id)
+	var jellyfin_user_id string
+	err := row.Scan(&jellyfin_user_id)
+	return jellyfin_user_id, err
+}
+
+const linkShowToJellyfin = `-- name: LinkShowToJellyfin :exec
+UPDATE shows SET jellyfin_series_id = ? WHERE id = ?
+`
+
+type LinkShowToJellyfinParams struct {
+	JellyfinSeriesID sql.NullString
+	ID               int64
+}
+
+func (q *Queries) LinkShowToJellyfin(ctx context.Context, arg LinkShowToJellyfinParams) error {
+	_, err := q.db.ExecContext(ctx, linkShowToJellyfin, arg.JellyfinSeriesID, arg.ID)
+	return err
+}
+
 const listGroupsForUser = `-- name: ListGroupsForUser :many
 SELECT g.id, g.name, m.role FROM watch_groups g
 JOIN group_managers m ON m.group_id = g.id
@@ -419,7 +457,7 @@ func (q *Queries) ListPeople(ctx context.Context, groupID int64) ([]Person, erro
 
 const listShows = `-- name: ListShows :many
 
-SELECT id, group_id, jellyfin_series_id, title, year, has_image, unplayed_count, next_up, last_played_at, synced_at, archived FROM shows WHERE group_id = ? ORDER BY archived, title COLLATE NOCASE, id
+SELECT id, group_id, jellyfin_series_id, title, year, has_image, unplayed_count, next_up, last_played_at, synced_at, archived, tmdb_id, poster_path, availability, match_tried FROM shows WHERE group_id = ? ORDER BY archived, title COLLATE NOCASE, id
 `
 
 // ---- shows ----
@@ -444,6 +482,10 @@ func (q *Queries) ListShows(ctx context.Context, groupID int64) ([]Show, error) 
 			&i.LastPlayedAt,
 			&i.SyncedAt,
 			&i.Archived,
+			&i.TmdbID,
+			&i.PosterPath,
+			&i.Availability,
+			&i.MatchTried,
 		); err != nil {
 			return nil, err
 		}
@@ -557,6 +599,58 @@ type SetShowArchivedParams struct {
 
 func (q *Queries) SetShowArchived(ctx context.Context, arg SetShowArchivedParams) error {
 	_, err := q.db.ExecContext(ctx, setShowArchived, arg.Archived, arg.ID, arg.GroupID)
+	return err
+}
+
+const setShowAvailability = `-- name: SetShowAvailability :exec
+UPDATE shows SET availability = ? WHERE id = ?
+`
+
+type SetShowAvailabilityParams struct {
+	Availability int64
+	ID           int64
+}
+
+func (q *Queries) SetShowAvailability(ctx context.Context, arg SetShowAvailabilityParams) error {
+	_, err := q.db.ExecContext(ctx, setShowAvailability, arg.Availability, arg.ID)
+	return err
+}
+
+const setShowCatalogue = `-- name: SetShowCatalogue :exec
+UPDATE shows SET tmdb_id = ?, title = ?, year = ?, poster_path = ?, availability = ?, match_tried = 1
+WHERE id = ? AND group_id = ?
+`
+
+type SetShowCatalogueParams struct {
+	TmdbID       sql.NullInt64
+	Title        string
+	Year         int64
+	PosterPath   string
+	Availability int64
+	ID           int64
+	GroupID      int64
+}
+
+// SetShowCatalogue ties a show to its Jellyseerr (TMDB) entry.
+func (q *Queries) SetShowCatalogue(ctx context.Context, arg SetShowCatalogueParams) error {
+	_, err := q.db.ExecContext(ctx, setShowCatalogue,
+		arg.TmdbID,
+		arg.Title,
+		arg.Year,
+		arg.PosterPath,
+		arg.Availability,
+		arg.ID,
+		arg.GroupID,
+	)
+	return err
+}
+
+const setShowMatchTried = `-- name: SetShowMatchTried :exec
+UPDATE shows SET match_tried = 1 WHERE id = ?
+`
+
+func (q *Queries) SetShowMatchTried(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, setShowMatchTried, id)
 	return err
 }
 

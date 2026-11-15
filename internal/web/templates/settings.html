@@ -25,7 +25,13 @@
   {{end}}
 </ul>
 {{if .D.InviteURL}}
-<p class="notice">Send this link to the person you want to share the group with. It works for 7 days.<br><code>{{.D.InviteURL}}</code></p>
+<div class="notice">
+  <p>Send this link to the person you want to share the group with. It works for 7 days.</p>
+  <div class="inline">
+    <input id="invite-url" class="copy-source" value="{{.D.InviteURL}}" readonly aria-label="Invite link">
+    <button type="button" class="secondary" data-copy="invite-url" hidden>Copy</button>
+  </div>
+</div>
 {{else}}
 <form method="post" action="/g/{{$g.ID}}/settings/invite"><button>Create invite link</button></form>
 {{end}}

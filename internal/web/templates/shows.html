@@ -5,9 +5,11 @@
 {{$row := .}}
 <li class="card">
   <div class="card-head">
-    {{if .Show.HasImage}}<img class="thumb" src="/g/{{.GroupID}}/image/{{.Show.JellyfinID}}" alt="" loading="lazy">{{end}}
+    {{if .Show.HasImage}}<img class="thumb" src="/g/{{.GroupID}}/image/{{.Show.JellyfinID}}" alt="" loading="lazy">
+    {{else if .Show.PosterPath}}<img class="thumb" src="/g/{{.GroupID}}/poster/{{.Show.PosterFile}}" alt="" loading="lazy">{{end}}
     <h2 class="grow">{{.Show.Title}}{{if .Show.Year}} <span class="year">{{.Show.Year}}</span>{{end}}
-      {{if not .Show.JellyfinID}}<span class="year">· not in Jellyfin</span>{{end}}</h2>
+      {{if awaiting .Show}}<span class="badge wait">{{status .Show.Availability}}</span>
+      {{else if not .Show.JellyfinID}}<span class="year">· not in Jellyfin</span>{{end}}</h2>
   </div>
   {{if .People}}
   <form id="watchers-{{.Show.ID}}" method="post" action="/g/{{.GroupID}}/shows/{{.Show.ID}}/watchers" class="pills" aria-label="Who watches {{.Show.Title}}">
@@ -23,11 +25,18 @@
       <input type="hidden" name="archived" value="{{if .Show.Archived}}0{{else}}1{{end}}">
       <button class="ghost">{{if .Show.Archived}}Restore{{else}}Archive{{end}}</button>
     </form>
+    {{if and .Catalogue (awaiting .Show) (requestable .Show.Availability)}}
+    <form method="post" action="/g/{{.GroupID}}/shows/{{.Show.ID}}/request"><button class="ghost">Request</button></form>
+    {{end}}
+    {{if and .Catalogue (not .Show.JellyfinID) (not .Show.TMDBID)}}
+    <button type="button" class="ghost" hx-get="/g/{{.GroupID}}/shows/{{.Show.ID}}/match" hx-target="#match-{{.Show.ID}}">Find match</button>
+    {{end}}
     <form method="post" action="/g/{{.GroupID}}/shows/{{.Show.ID}}/delete">
       <button class="ghost danger" data-confirm="Delete {{.Show.Title}} from this group?">Delete</button>
     </form>
     {{if .People}}<button class="save" form="watchers-{{.Show.ID}}">Save watchers</button>{{end}}
   </div>
+  <div id="match-{{.Show.ID}}" class="match"></div>
 </li>
 {{end}}
 
@@ -38,13 +47,9 @@
 <details class="fold" {{if .D.AddOpen}}open{{end}}>
   <summary>Add shows</summary>
   <div class="fold-body">
-    <input type="search" name="q" placeholder="Search your Jellyfin library" aria-label="Search the Jellyfin library"
+    <input type="search" name="q" placeholder="Search for a show" aria-label="Search for a show" maxlength="100"
            hx-get="/g/{{$g.ID}}/library" hx-trigger="load, input changed delay:300ms" hx-target="#library">
     <div id="library"><p class="empty">Loading…</p></div>
-    <form method="post" action="/g/{{$g.ID}}/shows" class="inline">
-      <input name="title" placeholder="Not in Jellyfin? Type a title" aria-label="Title of a show that isn't in Jellyfin" required maxlength="100">
-      <button class="secondary">Add</button>
-    </form>
   </div>
 </details>
 

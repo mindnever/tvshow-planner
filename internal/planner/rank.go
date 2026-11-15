@@ -25,6 +25,8 @@ type Show struct {
 	// Finished means progress is known and nothing is left to watch.
 	Finished     bool
 	LastPlayedAt int64 // unix seconds, 0 if unknown
+	// Unavailable means the show is being tracked but can't be played yet.
+	Unavailable bool
 }
 
 type Result struct {
@@ -69,7 +71,7 @@ func Rank(present []int64, shows []Show) []Result {
 	slices.SortStableFunc(out, func(a, b Result) int {
 		return cmp.Or(
 			cmp.Compare(a.Tier, b.Tier),
-			cmp.Compare(b2i(a.Show.Finished), b2i(b.Show.Finished)),
+			cmp.Compare(playable(a.Show), playable(b.Show)),
 			cmp.Compare(len(a.Missing), len(b.Missing)),
 			cmp.Compare(len(a.Extra), len(b.Extra)),
 			cmp.Compare(b.Show.LastPlayedAt, a.Show.LastPlayedAt),
@@ -79,8 +81,13 @@ func Rank(present []int64, shows []Show) []Result {
 	return out
 }
 
-func b2i(b bool) int {
-	if b {
+// playable orders shows within a tier: something to watch now, then
+// finished shows, then shows that aren't available yet.
+func playable(s Show) int {
+	switch {
+	case s.Unavailable:
+		return 2
+	case s.Finished:
 		return 1
 	}
 	return 0

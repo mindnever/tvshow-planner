@@ -17,6 +17,7 @@ import (
 	"tvshow-planner/internal/auth"
 	"tvshow-planner/internal/db"
 	"tvshow-planner/internal/secretbox"
+	"tvshow-planner/internal/seerr"
 )
 
 //go:embed templates/*.html
@@ -30,19 +31,24 @@ type Server struct {
 	auth        *auth.Auth
 	box         *secretbox.Box
 	baseURL     string
-	jellyfinURL string       // the one Jellyfin server users log in with
-	hc          *http.Client // for Jellyfin
+	jellyfinURL string        // the one Jellyfin server users log in with
+	hc          *http.Client  // for Jellyfin
+	seerr       *seerr.Client // nil when Jellyseerr isn't configured
 	pages       map[string]*template.Template
 }
 
-func New(store *db.Store, a *auth.Auth, box *secretbox.Box, baseURL, jellyfinURL string) *Server {
+// New builds the server. sc is the optional Jellyseerr client; nil turns off
+// everything that needs it.
+func New(store *db.Store, a *auth.Auth, box *secretbox.Box, baseURL, jellyfinURL string, sc *seerr.Client) *Server {
 	s := &Server{
-		store: store, auth: a, box: box, baseURL: baseURL, jellyfinURL: jellyfinURL,
+		store: store, auth: a, box: box, baseURL: baseURL, jellyfinURL: jellyfinURL, seerr: sc,
 		hc:    &http.Client{Timeout: 15 * time.Second},
 		pages: map[string]*template.Template{},
 	}
 	for _, name := range []string{"home", "planner", "shows", "people", "settings", "invite", "message", "login", "quickconnect"} {
-		s.pages[name] = template.Must(template.New("").Funcs(template.FuncMap{"join": joinNames}).ParseFS(templateFS,
+		s.pages[name] = template.Must(template.New("").Funcs(template.FuncMap{
+			"join": joinNames, "awaiting": awaiting, "status": availabilityLabel, "requestable": seerr.Requestable,
+		}).ParseFS(templateFS,
 			"templates/base.html", "templates/partials.html", "templates/"+name+".html"))
 	}
 	return s
@@ -83,7 +89,11 @@ func (s *Server) Handler() http.Handler {
 	group("POST /g/{gid}/shows/{sid}/watchers", s.setWatchers)
 	group("POST /g/{gid}/shows/{sid}/archive", s.archiveShow)
 	group("POST /g/{gid}/shows/{sid}/delete", s.deleteShow)
+	group("POST /g/{gid}/shows/{sid}/request", s.requestShow)
+	group("GET /g/{gid}/shows/{sid}/match", s.matches)
+	group("POST /g/{gid}/shows/{sid}/match", s.matchShow)
 	group("GET /g/{gid}/library", s.library)
+	group("GET /g/{gid}/poster/{file}", s.poster)
 	group("GET /g/{gid}/image/{item}", s.image)
 
 	group("GET /g/{gid}/settings", s.settings)

@@ -17,6 +17,10 @@ type Config struct {
 	DatabasePath string
 	SecretKey    string
 	JellyfinURL  string // the Jellyfin server users log in with
+	// Optional: Jellyseerr, for shows that aren't in Jellyfin yet. Both are
+	// set or both are empty.
+	JellyseerrURL    string
+	JellyseerrAPIKey string
 }
 
 func Load() (Config, error) {
@@ -39,6 +43,15 @@ func Load() (Config, error) {
 	var err error
 	if c.JellyfinURL, err = jellyfin.NormalizeURL(os.Getenv("JELLYFIN_URL")); err != nil {
 		return c, fmt.Errorf("JELLYFIN_URL: %w", err)
+	}
+	c.JellyseerrAPIKey = strings.TrimSpace(os.Getenv("JELLYSEERR_API_KEY"))
+	if raw := os.Getenv("JELLYSEERR_URL"); raw != "" || c.JellyseerrAPIKey != "" {
+		if raw == "" || c.JellyseerrAPIKey == "" {
+			return c, errors.New("JELLYSEERR_URL and JELLYSEERR_API_KEY must be set together")
+		}
+		if c.JellyseerrURL, err = jellyfin.NormalizeURL(raw); err != nil {
+			return c, fmt.Errorf("JELLYSEERR_URL: %w", err)
+		}
 	}
 	if u, err := url.Parse(c.BaseURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return c, fmt.Errorf("PUBLIC_BASE_URL %q is not an http(s) URL", c.BaseURL)

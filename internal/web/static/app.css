@@ -61,7 +61,10 @@ button.ghost.danger, button.link.danger { color: var(--danger); }
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .field-error { margin: 0; color: var(--danger); font-size: .92rem; overflow-wrap: anywhere; }
 
-form.inline { display: flex; gap: .5rem; align-items: center; }
+.inline { display: flex; gap: .5rem; align-items: center; }
+.notice > p { margin: 0 0 .6rem; }
+input.copy-source { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .88rem; background: var(--raised); text-overflow: ellipsis; }
+button[data-copy] { min-width: 5.5rem; }
 form.stack { display: grid; gap: .85rem; }
 form.stack label { display: grid; gap: .3rem; font-size: .88rem; font-weight: 500; color: var(--muted); }
 
@@ -69,7 +72,7 @@ form.stack label { display: grid; gap: .3rem; font-size: .88rem; font-weight: 50
 .notice.error { border-left-color: var(--danger); }
 
 /* ---- lists ---- */
-ul.rows, ul.cards, ul.results { list-style: none; margin: 0; padding: 0; display: grid; gap: .6rem; }
+ul.rows, ul.cards, ul.results { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: .6rem; }
 ul.rows li { display: flex; align-items: center; gap: .6rem; padding: .55rem .75rem; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow-wrap: anywhere; }
 ul.rows + form, ul.rows + .notice, input[type=search] + div { margin-top: .75rem; }
 ul.rows input { border-color: transparent; background: var(--raised); }
@@ -102,6 +105,11 @@ ul.rows input { border-color: transparent; background: var(--raised); }
 .badge.good { color: var(--good); background: var(--good-soft); }
 .badge.ok { color: var(--ok); background: var(--ok-soft); }
 .badge.warn { color: var(--warn); background: var(--warn-soft); }
+.badge.wait { color: var(--muted); background: var(--raised); font-weight: 500; white-space: nowrap; }
+#library h3 { margin: 1rem 0 .5rem; font-size: .88rem; font-weight: 600; color: var(--muted); }
+.match:not(:empty) { margin-top: .6rem; }
+form.custom { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; margin-top: .75rem; color: var(--muted); }
+form.custom button { white-space: normal; overflow-wrap: anywhere; text-align: left; }
 .next { color: var(--muted); font-size: .9rem; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .refresh { margin-top: 1.25rem; text-align: center; }
 
@@ -115,11 +123,11 @@ ul.rows input { border-color: transparent; background: var(--raised); }
 .pill span { display: block; padding: .35rem .85rem; border-radius: 2rem; border: 1.5px solid var(--line); color: var(--muted); font-size: .95rem; }
 .pill input:checked + span { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .pill input:focus-visible + span { outline: 3px solid var(--accent); outline-offset: 2px; }
-.card-actions { display: flex; align-items: center; gap: .25rem; margin: -.2rem -.35rem -.3rem; }
+.card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem; margin: -.2rem -.35rem -.3rem; }
 .card-actions .save { margin-left: auto; min-height: 2.2rem; padding: .3rem .9rem; }
 /* Show "Save watchers" only when a checkbox differs from its saved state
    (the checked attribute is what the server rendered; :checked is the current state). */
-.card:not(:has(.pills input:checked:not([checked]), .pills input[checked]:not(:checked))) .save { visibility: hidden; }
+.card:not(:has(.pills input:checked:not([checked]), .pills input[checked]:not(:checked))) .save { display: none; }
 
 /* ---- collapsible sections ---- */
 .fold { margin: 0 0 1rem; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
