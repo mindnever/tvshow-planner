@@ -5,8 +5,10 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"tvshow-planner/internal/auth"
 	"tvshow-planner/internal/db"
@@ -18,8 +20,49 @@ import (
 // requested, and not in Jellyfin yet.
 
 // awaiting reports whether a show is tracked in Jellyseerr but can't be
-// watched yet because it isn't in Jellyfin.
-func awaiting(sh db.Show) bool { return sh.JellyfinID == "" && sh.TMDBID != 0 }
+// watched yet because it isn't in Jellyfin. A show the group watches
+// somewhere else is not waiting for anything.
+func awaiting(sh db.Show) bool { return sh.JellyfinID == "" && sh.TMDBID != 0 && sh.WatchOn == "" }
+
+// services are suggested for "where we watch"; any other name can be typed.
+var services = []string{
+	"Netflix", "Disney+", "Prime Video", "Apple TV+", "Max", "Hulu", "Paramount+",
+	"Peacock", "YouTube", "SkyShowtime", "Blu-ray", "Live TV",
+}
+
+// watchOptions is the suggestion list plus the names this group already uses.
+func watchOptions(shows []db.Show) []string {
+	out := slices.Clone(services)
+	for _, sh := range shows {
+		if sh.WatchOn != "" && !slices.Contains(out, sh.WatchOn) {
+			out = append(out, sh.WatchOn)
+		}
+	}
+	return out
+}
+
+// setWatchOn records where the group watches a show that isn't in Jellyfin.
+// An empty value puts it back to Jellyfin.
+func (s *Server) setWatchOn(w http.ResponseWriter, r *http.Request, g db.Group) {
+	sh, _, ok := s.findShow(r, g)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	if sh.JellyfinID != "" {
+		http.Error(w, "this show is in Jellyfin", http.StatusBadRequest)
+		return
+	}
+	where := cleanName(r.FormValue("where"))
+	if utf8.RuneCountInString(where) > 40 {
+		where = string([]rune(where)[:40])
+	}
+	if err := s.store.SetShowWatchOn(r.Context(), g.ID, sh.ID, where); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	redirect(w, r, groupPath(g, "/shows"))
+}
 
 func availabilityLabel(status int) string {
 	switch status {
@@ -200,8 +243,8 @@ func (s *Server) resolveUnlinked(ctx context.Context, c *jellyfin.Client, groupI
 
 	for i := range shows {
 		sh := &shows[i]
-		if sh.JellyfinID != "" {
-			continue
+		if sh.JellyfinID != "" || sh.WatchOn != "" {
+			continue // in Jellyfin already, or watched somewhere else
 		}
 		if sh.TMDBID == 0 {
 			found, err := c.ListSeries(ctx, sh.Title, nil, 20)

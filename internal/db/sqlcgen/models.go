@@ -48,6 +48,7 @@ type Show struct {
 	PosterPath       string
 	Availability     int64
 	MatchTried       bool
+	WatchOn          string
 }
 
 type ShowWatcher struct {

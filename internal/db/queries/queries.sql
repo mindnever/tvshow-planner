@@ -101,6 +101,9 @@ ON CONFLICT DO NOTHING;
 UPDATE shows SET tmdb_id = ?, title = ?, year = ?, poster_path = ?, availability = ?, match_tried = 1
 WHERE id = ? AND group_id = ?;
 
+-- name: SetShowWatchOn :exec
+UPDATE shows SET watch_on = ? WHERE id = ? AND group_id = ?;
+
 -- name: SetShowAvailability :exec
 UPDATE shows SET availability = ? WHERE id = ?;
 

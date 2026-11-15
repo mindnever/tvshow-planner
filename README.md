@@ -29,6 +29,8 @@ The app only reads from Jellyfin (library, watched counts, next-up, posters) and
 
 There is one search box for adding shows. Whatever is typed there can also be added as it is (**Add “…” anyway**), for a show the search doesn't find. It is linked to Jellyfin by itself once exactly one series with the same name appears in the library.
 
+For a show the group watches outside Jellyfin, open the show's "⋯" menu and fill in **Where we watch** (for example "Netflix"; common services are suggested, anything can be typed). Such a show is listed on Tonight with "On Netflix", is never linked to Jellyfin by itself and is not offered for request. Clearing the field puts it back.
+
 With `JELLYSEERR_URL` and `JELLYSEERR_API_KEY` set (Jellyseerr or Seerr; the key is under Settings → General), the search on the Shows page also covers Jellyseerr's whole TV catalogue:
 
 - A show can be added before it is available, with its poster and status (not requested, requested, downloading, partly available), and requested from the same place.

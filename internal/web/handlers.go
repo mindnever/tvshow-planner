@@ -286,6 +286,8 @@ type showsView struct {
 	AddOpen bool
 	// Catalogue is set when Jellyseerr is configured.
 	Catalogue bool
+	// Services are the suggestions for "where we watch".
+	Services []string
 }
 
 func (s *Server) shows(w http.ResponseWriter, r *http.Request, g db.Group) {
@@ -311,7 +313,7 @@ func (s *Server) renderShows(w http.ResponseWriter, r *http.Request, g db.Group,
 	}
 	// Newest first, so a show that was just added is at the top.
 	slices.SortFunc(shows, func(a, b db.Show) int { return cmp.Compare(b.ID, a.ID) })
-	v := showsView{Catalogue: s.seerr != nil}
+	v := showsView{Catalogue: s.seerr != nil, Services: watchOptions(shows)}
 	for _, sh := range shows {
 		row := showRow{GroupID: g.ID, Show: sh, People: people, Watchers: map[int64]bool{}, Catalogue: v.Catalogue}
 		for _, pid := range watchers[sh.ID] {

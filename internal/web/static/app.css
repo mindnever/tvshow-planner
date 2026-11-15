@@ -107,7 +107,7 @@ ul.rows input { border-color: transparent; background: var(--raised); }
 .badge.warn { color: var(--warn); background: var(--warn-soft); }
 .badge.wait { color: var(--muted); background: var(--raised); font-weight: 500; white-space: nowrap; }
 #library h3 { margin: 1rem 0 .5rem; font-size: .88rem; font-weight: 600; color: var(--muted); }
-.match:not(:empty) { margin-top: .6rem; }
+.match:empty { display: none; }
 form.custom { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; margin-top: .75rem; color: var(--muted); }
 form.custom button { white-space: normal; overflow-wrap: anywhere; text-align: left; }
 .next { color: var(--muted); font-size: .9rem; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -125,11 +125,29 @@ form.custom button { white-space: normal; overflow-wrap: anywhere; text-align: l
 .pill input:focus-visible + span { outline: 3px solid var(--accent); outline-offset: 2px; }
 .card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem; margin: -.2rem -.35rem -.3rem; }
 .card-actions .save { margin-left: auto; min-height: 2.2rem; padding: .3rem .9rem; }
+.card-actions { margin: 0; }
 /* Show "Save watchers" only when a checkbox differs from its saved state
    (the checked attribute is what the server rendered; :checked is the current state). */
 .card:not(:has(.pills input:checked:not([checked]), .pills input[checked]:not(:checked))) .save { display: none; }
 
 /* ---- collapsible sections ---- */
+/* The action row only holds "Save watchers": no row when there is nothing to save. */
+.card:not(:has(.pills input:checked:not([checked]), .pills input[checked]:not(:checked))) .card-actions { display: none; }
+
+/* "⋯" menu with a card's less common actions. */
+.menu { position: relative; align-self: flex-start; flex: none; margin: -.3rem -.35rem 0 0; }
+.menu > summary { list-style: none; display: grid; place-items: center; width: 2.2rem; height: 2.2rem; border-radius: .6rem; color: var(--muted); font-size: 1.3rem; line-height: 1; cursor: pointer; user-select: none; }
+.menu > summary::-webkit-details-marker { display: none; }
+.menu > summary:hover, .menu[open] > summary { background: var(--raised); color: var(--text); }
+.menu-panel { position: absolute; z-index: 10; top: calc(100% + .25rem); right: 0; width: max-content; min-width: 11rem; max-width: min(18rem, 80vw); display: grid; gap: .15rem; padding: .4rem; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 .5rem 1.5rem rgb(0 0 0 / .25); }
+.menu-panel button.ghost { width: 100%; text-align: left; }
+.menu-panel .where { display: grid; gap: .3rem; padding: .3rem .3rem .5rem; margin-bottom: .2rem; border-bottom: 1px solid var(--line); }
+.menu-panel .where label { font-size: .82rem; font-weight: 500; color: var(--muted); }
+.menu-panel .where input { padding: .4rem .6rem; }
+.menu-panel .where button { min-height: 2.2rem; padding: .3rem .8rem; }
+.fold .menu-panel { background: var(--surface); }
+.fold.archived .card:has(.menu[open]) { opacity: 1; }
+
 .fold { margin: 0 0 1rem; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
 .fold > summary { display: flex; align-items: center; gap: .5rem; padding: .75rem .9rem; font-weight: 600; cursor: pointer; list-style: none; border-radius: var(--radius); }
 .fold > summary::-webkit-details-marker { display: none; }

@@ -457,7 +457,7 @@ func (q *Queries) ListPeople(ctx context.Context, groupID int64) ([]Person, erro
 
 const listShows = `-- name: ListShows :many
 
-SELECT id, group_id, jellyfin_series_id, title, year, has_image, unplayed_count, next_up, last_played_at, synced_at, archived, tmdb_id, poster_path, availability, match_tried FROM shows WHERE group_id = ? ORDER BY archived, title COLLATE NOCASE, id
+SELECT id, group_id, jellyfin_series_id, title, year, has_image, unplayed_count, next_up, last_played_at, synced_at, archived, tmdb_id, poster_path, availability, match_tried, watch_on FROM shows WHERE group_id = ? ORDER BY archived, title COLLATE NOCASE, id
 `
 
 // ---- shows ----
@@ -486,6 +486,7 @@ func (q *Queries) ListShows(ctx context.Context, groupID int64) ([]Show, error) 
 			&i.PosterPath,
 			&i.Availability,
 			&i.MatchTried,
+			&i.WatchOn,
 		); err != nil {
 			return nil, err
 		}
@@ -651,6 +652,21 @@ UPDATE shows SET match_tried = 1 WHERE id = ?
 
 func (q *Queries) SetShowMatchTried(ctx context.Context, id int64) error {
 	_, err := q.db.ExecContext(ctx, setShowMatchTried, id)
+	return err
+}
+
+const setShowWatchOn = `-- name: SetShowWatchOn :exec
+UPDATE shows SET watch_on = ? WHERE id = ? AND group_id = ?
+`
+
+type SetShowWatchOnParams struct {
+	WatchOn string
+	ID      int64
+	GroupID int64
+}
+
+func (q *Queries) SetShowWatchOn(ctx context.Context, arg SetShowWatchOnParams) error {
+	_, err := q.db.ExecContext(ctx, setShowWatchOn, arg.WatchOn, arg.ID, arg.GroupID)
 	return err
 }
 

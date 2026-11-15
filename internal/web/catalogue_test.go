@@ -292,3 +292,48 @@ func TestWithoutJellyseerr(t *testing.T) {
 		t.Errorf("catalogue add without Jellyseerr = %d", code)
 	}
 }
+
+func TestWatchedElsewhere(t *testing.T) {
+	app := startTestApp(t, true)
+	alice := app.client("alice")
+	app.post(alice, "/groups", url.Values{"name": {"Family"}})
+	app.post(alice, "/g/1/people", url.Values{"name": {"Ana"}})
+	app.post(alice, "/g/1/shows", url.Values{"tmdb_id": {"300"}})           // show 1: Quiz Night, from the catalogue
+	app.post(alice, "/g/1/shows", url.Values{"jellyfin_id": {severanceID}}) // show 2: in Jellyfin
+	mustContain(t, app.get(alice, "/g/1/shows"), "Not requested", "/g/1/shows/1/request", `<option value="Netflix">`)
+
+	// Saying where it is watched: no status, nothing to request, and the
+	// name is suggested from then on.
+	shows := app.post(alice, "/g/1/shows/1/where", url.Values{"where": {"  My   Disc Shelf "}})
+	mustContain(t, shows, "On My Disc Shelf", `<option value="My Disc Shelf">`, `name="where" value="My Disc Shelf"`)
+	mustNotContain(t, shows, "Not requested", "/g/1/shows/1/request")
+
+	// On the planner it is an ordinary show, not one that is still to come.
+	app.post(alice, "/g/1/shows/1/watchers", url.Values{"person": {"1"}})
+	app.post(alice, "/g/1/presence/1", nil)
+	planner := app.get(alice, "/g/1")
+	mustContain(t, planner, "Quiz Night", "On My Disc Shelf")
+	mustNotContain(t, planner, "Not available yet", " finished")
+
+	// It is left alone even when it turns up in Jellyfin.
+	app.js.set(func() { app.js.status[300], app.js.jellyfin[300] = 5, slowHorsesID })
+	app.jf.set(func() {
+		app.jf.extra = append(app.jf.extra, map[string]any{"Id": slowHorsesID, "Name": "Quiz Night", "ProductionYear": 2019,
+			"UserData": map[string]any{"UnplayedItemCount": 4}})
+	})
+	app.post(alice, "/g/1/sync", nil)
+	mustContain(t, app.get(alice, "/g/1/shows"), "On My Disc Shelf")
+
+	// Clearing it hands the show back: the next sync links it to Jellyfin.
+	mustNotContain(t, app.post(alice, "/g/1/shows/1/where", url.Values{"where": {""}}), "On My Disc Shelf")
+	mustContain(t, app.post(alice, "/g/1/sync", nil), "Quiz Night", "4 unwatched")
+
+	// A show in Jellyfin is watched there; other people's groups are off limits.
+	if code, _ := app.do(alice, "POST", "/g/1/shows/2/where", url.Values{"where": {"Netflix"}}); code != http.StatusBadRequest {
+		t.Errorf("where on a Jellyfin show = %d", code)
+	}
+	bob := app.client("bob")
+	if code, _ := app.do(bob, "POST", "/g/1/shows/1/where", url.Values{"where": {"Netflix"}}); code != http.StatusForbidden {
+		t.Errorf("where in someone else's group = %d", code)
+	}
+}

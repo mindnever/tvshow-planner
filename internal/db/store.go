@@ -253,6 +253,9 @@ type Show struct {
 	PosterPath   string // TMDB poster, e.g. "/abc.jpg"
 	Availability int    // Jellyseerr's status, see package seerr
 	MatchTried   bool   // the typed title was looked up in Jellyseerr already
+	// WatchOn is where the group watches a show that isn't in Jellyfin,
+	// e.g. "Netflix". Empty means Jellyfin.
+	WatchOn string
 }
 
 // PosterFile is PosterPath without its leading slash, for use in a URL.
@@ -267,7 +270,7 @@ func (s *Store) ListShows(ctx context.Context, groupID int64) ([]Show, error) {
 			HasImage: r.HasImage, Unplayed: int(r.UnplayedCount), NextUp: r.NextUp,
 			LastPlayedAt: r.LastPlayedAt, SyncedAt: r.SyncedAt, Archived: r.Archived,
 			TMDBID: r.TmdbID.Int64, PosterPath: r.PosterPath, Availability: int(r.Availability),
-			MatchTried: r.MatchTried,
+			MatchTried: r.MatchTried, WatchOn: r.WatchOn,
 		}
 	}
 	return out, err
@@ -295,6 +298,11 @@ func (s *Store) SetShowCatalogue(ctx context.Context, groupID int64, sh Show) er
 		TmdbID: sql.NullInt64{Int64: sh.TMDBID, Valid: true}, Title: sh.Title, Year: int64(sh.Year),
 		PosterPath: sh.PosterPath, Availability: int64(sh.Availability), ID: sh.ID, GroupID: groupID,
 	})
+}
+
+// SetShowWatchOn records where the group watches the show; "" means Jellyfin.
+func (s *Store) SetShowWatchOn(ctx context.Context, groupID, showID int64, where string) error {
+	return s.q.SetShowWatchOn(ctx, sqlcgen.SetShowWatchOnParams{WatchOn: where, ID: showID, GroupID: groupID})
 }
 
 func (s *Store) SetShowAvailability(ctx context.Context, showID int64, availability int) error {

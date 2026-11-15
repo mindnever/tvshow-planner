@@ -3,13 +3,42 @@
 {{/* One show: title, who watches it, and its actions. Takes a showRow. */}}
 {{define "showcard"}}
 {{$row := .}}
+{{$outside := not .Show.JellyfinID}}
 <li class="card">
   <div class="card-head">
     {{if .Show.HasImage}}<img class="thumb" src="/g/{{.GroupID}}/image/{{.Show.JellyfinID}}" alt="" loading="lazy">
     {{else if .Show.PosterPath}}<img class="thumb" src="/g/{{.GroupID}}/poster/{{.Show.PosterFile}}" alt="" loading="lazy">{{end}}
     <h2 class="grow">{{.Show.Title}}{{if .Show.Year}} <span class="year">{{.Show.Year}}</span>{{end}}
-      {{if awaiting .Show}}<span class="badge wait">{{status .Show.Availability}}</span>
-      {{else if not .Show.JellyfinID}}<span class="year">· not in Jellyfin</span>{{end}}</h2>
+      {{if .Show.WatchOn}}<span class="badge wait">On {{.Show.WatchOn}}</span>
+      {{else if awaiting .Show}}<span class="badge wait">{{status .Show.Availability}}</span>
+      {{else if $outside}}<span class="year">· not in Jellyfin</span>{{end}}</h2>
+    <details class="menu">
+      <summary aria-label="More actions for {{.Show.Title}}">⋯</summary>
+      <div class="menu-panel">
+        {{if $outside}}
+        <form method="post" action="/g/{{.GroupID}}/shows/{{.Show.ID}}/where" class="where">
+          <label for="where-{{.Show.ID}}">Where we watch</label>
+          <div class="inline">
+            <input id="where-{{.Show.ID}}" name="where" value="{{.Show.WatchOn}}" data-complete="services" placeholder="Jellyfin" maxlength="40" autocomplete="off" autocapitalize="words" spellcheck="false">
+            <button class="secondary">Save</button>
+          </div>
+        </form>
+        {{end}}
+        {{if and .Catalogue (awaiting .Show) (requestable .Show.Availability)}}
+        <form method="post" action="/g/{{.GroupID}}/shows/{{.Show.ID}}/request"><button class="ghost">Request</button></form>
+        {{end}}
+        {{if and .Catalogue $outside (not .Show.TMDBID) (not .Show.WatchOn)}}
+        <button type="button" class="ghost" hx-get="/g/{{.GroupID}}/shows/{{.Show.ID}}/match" hx-target="#match-{{.Show.ID}}">Find match</button>
+        {{end}}
+        <form method="post" action="/g/{{.GroupID}}/shows/{{.Show.ID}}/archive">
+          <input type="hidden" name="archived" value="{{if .Show.Archived}}0{{else}}1{{end}}">
+          <button class="ghost">{{if .Show.Archived}}Restore{{else}}Archive{{end}}</button>
+        </form>
+        <form method="post" action="/g/{{.GroupID}}/shows/{{.Show.ID}}/delete">
+          <button class="ghost danger" data-confirm="Delete {{.Show.Title}} from this group?">Delete</button>
+        </form>
+      </div>
+    </details>
   </div>
   {{if .People}}
   <form id="watchers-{{.Show.ID}}" method="post" action="/g/{{.GroupID}}/shows/{{.Show.ID}}/watchers" class="pills" aria-label="Who watches {{.Show.Title}}">
@@ -21,19 +50,6 @@
   <p class="empty"><a href="/g/{{.GroupID}}/people">Add people</a> to choose who watches this.</p>
   {{end}}
   <div class="card-actions">
-    <form method="post" action="/g/{{.GroupID}}/shows/{{.Show.ID}}/archive">
-      <input type="hidden" name="archived" value="{{if .Show.Archived}}0{{else}}1{{end}}">
-      <button class="ghost">{{if .Show.Archived}}Restore{{else}}Archive{{end}}</button>
-    </form>
-    {{if and .Catalogue (awaiting .Show) (requestable .Show.Availability)}}
-    <form method="post" action="/g/{{.GroupID}}/shows/{{.Show.ID}}/request"><button class="ghost">Request</button></form>
-    {{end}}
-    {{if and .Catalogue (not .Show.JellyfinID) (not .Show.TMDBID)}}
-    <button type="button" class="ghost" hx-get="/g/{{.GroupID}}/shows/{{.Show.ID}}/match" hx-target="#match-{{.Show.ID}}">Find match</button>
-    {{end}}
-    <form method="post" action="/g/{{.GroupID}}/shows/{{.Show.ID}}/delete">
-      <button class="ghost danger" data-confirm="Delete {{.Show.Title}} from this group?">Delete</button>
-    </form>
     {{if .People}}<button class="save" form="watchers-{{.Show.ID}}">Save watchers</button>{{end}}
   </div>
   <div id="match-{{.Show.ID}}" class="match"></div>
@@ -52,6 +68,9 @@
     <div id="library"><p class="empty">Loading…</p></div>
   </div>
 </details>
+
+{{/* Suggestions for "where we watch"; app.js completes them inline as you type. */}}
+<datalist id="services">{{range .D.Services}}<option value="{{.}}">{{end}}</datalist>
 
 {{if .D.Active}}
 <ul class="cards">

@@ -89,6 +89,7 @@ func (s *Server) Handler() http.Handler {
 	group("POST /g/{gid}/shows/{sid}/watchers", s.setWatchers)
 	group("POST /g/{gid}/shows/{sid}/archive", s.archiveShow)
 	group("POST /g/{gid}/shows/{sid}/delete", s.deleteShow)
+	group("POST /g/{gid}/shows/{sid}/where", s.setWatchOn)
 	group("POST /g/{gid}/shows/{sid}/request", s.requestShow)
 	group("GET /g/{gid}/shows/{sid}/match", s.matches)
 	group("POST /g/{gid}/shows/{sid}/match", s.matchShow)

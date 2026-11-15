@@ -42,7 +42,8 @@
         {{if eq .Tier 1}}<p class="badge good">Everyone's here</p>
         {{else if eq .Tier 2}}<p class="badge ok">Ready · {{join .Extra}} {{if eq (len .Extra) 1}}doesn't{{else}}don't{{end}} follow it</p>
         {{else}}<p class="badge warn">Missing {{join .Missing}}</p>{{end}}
-        {{if awaiting .Show}}<p class="next">Not available yet · {{status .Show.Availability}}</p>
+        {{if .Show.WatchOn}}<p class="next">On {{.Show.WatchOn}}</p>
+        {{else if awaiting .Show}}<p class="next">Not available yet · {{status .Show.Availability}}</p>
         {{else if .Finished}}<p class="next">All caught up</p>
         {{else if .Show.NextUp}}<p class="next">Next: {{.Show.NextUp}}</p>
         {{else if .Show.Unplayed}}<p class="next">{{.Show.Unplayed}} unwatched</p>{{end}}
