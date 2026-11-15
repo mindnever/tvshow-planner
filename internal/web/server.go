@@ -110,11 +110,11 @@ func (s *Server) Handler() http.Handler {
 
 	group("GET /g/{gid}/people", s.people)
 	group("POST /g/{gid}/people", s.createPerson)
-	group("POST /g/{gid}/people/{pid}", s.renamePerson)
-	group("POST /g/{gid}/people/{pid}/delete", s.deletePerson)
+	group("POST /g/{gid}/people/save", s.savePeople)
 
 	group("GET /g/{gid}/shows", s.shows)
 	group("POST /g/{gid}/shows", s.createShow)
+	group("POST /g/{gid}/shows/watchers", s.saveWatchers)
 	group("POST /g/{gid}/shows/{sid}/watchers", s.setWatchers)
 	group("POST /g/{gid}/shows/{sid}/archive", s.archiveShow)
 	group("POST /g/{gid}/shows/{sid}/delete", s.deleteShow)

@@ -3,16 +3,16 @@
 {{$g := .Group}}
 <h1>People</h1>
 {{if .D}}
-<ul class="rows">
+{{/* Names and removals are applied together by the page-wide form. */}}
+<form id="pagesave" method="post" action="/g/{{$g.ID}}/people/save"></form>
+<ul class="rows people">
   {{range .D}}
   <li>
-    <form method="post" action="/g/{{$g.ID}}/people/{{.ID}}" class="inline grow">
-      <input name="name" value="{{.Name}}" aria-label="Name" required maxlength="100">
-      <button class="ghost">Rename</button>
-    </form>
-    <form method="post" action="/g/{{$g.ID}}/people/{{.ID}}/delete">
-      <button class="ghost danger" data-confirm="Remove {{.Name}} from the group and from every show?">Remove</button>
-    </form>
+    <input type="text" name="name-{{.ID}}" value="{{.Name}}" form="pagesave" class="grow" aria-label="Name of {{.Name}}" maxlength="100" autocomplete="off">
+    <label class="toggle">
+      <input type="checkbox" name="remove" value="{{.ID}}" form="pagesave" data-name="{{.Name}}">
+      <span class="off">Remove</span><span class="on">Undo</span>
+    </label>
   </li>
   {{end}}
 </ul>
@@ -25,4 +25,5 @@
   <input name="name" placeholder="Name" aria-label="Name" required maxlength="100">
   <button>Add</button>
 </form>
+{{if .D}}{{template "savebar"}}{{end}}
 {{end}}

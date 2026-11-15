@@ -229,16 +229,39 @@ func (s *Server) syncNow(w http.ResponseWriter, r *http.Request, g db.Group) {
 // ---- people ----
 
 func (s *Server) people(w http.ResponseWriter, r *http.Request, g db.Group) {
+	s.renderPeople(w, r, g, "")
+}
+
+// renderPeople shows the People page; errMsg says why a change was refused.
+func (s *Server) renderPeople(w http.ResponseWriter, r *http.Request, g db.Group, errMsg string) {
 	people, err := s.store.ListPeople(r.Context(), g.ID)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	s.render(w, r, http.StatusOK, "people", pageData{Group: &g, Tab: "people", D: people})
+	status := http.StatusOK
+	if errMsg != "" {
+		status = http.StatusConflict
+	}
+	s.render(w, r, status, "people", pageData{Group: &g, Tab: "people", Error: errMsg, D: people})
 }
+
+// sameName reports whether two people would be told apart only by case.
+func sameName(a, b string) bool { return strings.EqualFold(a, b) }
 
 func (s *Server) createPerson(w http.ResponseWriter, r *http.Request, g db.Group) {
 	if name := cleanName(r.FormValue("name")); name != "" {
+		people, err := s.store.ListPeople(r.Context(), g.ID)
+		if err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		for _, p := range people {
+			if sameName(p.Name, name) {
+				s.renderPeople(w, r, g, "There is already someone called "+p.Name+" in this group.")
+				return
+			}
+		}
 		if err := s.store.CreatePerson(r.Context(), g.ID, name); err != nil {
 			s.fail(w, r, err)
 			return
@@ -247,20 +270,54 @@ func (s *Server) createPerson(w http.ResponseWriter, r *http.Request, g db.Group
 	redirect(w, r, groupPath(g, "/people"))
 }
 
-func (s *Server) renamePerson(w http.ResponseWriter, r *http.Request, g db.Group) {
-	if name := cleanName(r.FormValue("name")); name != "" {
-		if err := s.store.RenamePerson(r.Context(), g.ID, pathID(r, "pid"), name); err != nil {
+// savePeople applies the People page in one go: the names as they are now
+// in the form, and the removal of everyone marked for it.
+func (s *Server) savePeople(w http.ResponseWriter, r *http.Request, g db.Group) {
+	ctx := r.Context()
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	people, err := s.store.ListPeople(ctx, g.ID)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	// Work out everyone's name after the save, leaving out those removed.
+	removed, after := map[int64]bool{}, map[int64]string{}
+	for _, p := range people {
+		id := strconv.FormatInt(p.ID, 10)
+		if slices.Contains(r.PostForm["remove"], id) {
+			removed[p.ID] = true
+			continue
+		}
+		after[p.ID] = p.Name
+		if name := cleanName(r.PostForm.Get("name-" + id)); name != "" {
+			after[p.ID] = name
+		}
+	}
+	// A rename must not give two people the same name. Nothing is saved then.
+	for _, p := range people {
+		if removed[p.ID] || after[p.ID] == p.Name {
+			continue
+		}
+		for _, other := range people {
+			if other.ID != p.ID && !removed[other.ID] && sameName(after[other.ID], after[p.ID]) {
+				s.renderPeople(w, r, g, "Two people can't both be called "+after[p.ID]+". Nothing was saved.")
+				return
+			}
+		}
+	}
+	for _, p := range people {
+		if removed[p.ID] {
+			err = s.store.DeletePerson(ctx, g.ID, p.ID)
+		} else if after[p.ID] != p.Name {
+			err = s.store.RenamePerson(ctx, g.ID, p.ID, after[p.ID])
+		}
+		if err != nil {
 			s.fail(w, r, err)
 			return
 		}
-	}
-	redirect(w, r, groupPath(g, "/people"))
-}
-
-func (s *Server) deletePerson(w http.ResponseWriter, r *http.Request, g db.Group) {
-	if err := s.store.DeletePerson(r.Context(), g.ID, pathID(r, "pid")); err != nil {
-		s.fail(w, r, err)
-		return
 	}
 	redirect(w, r, groupPath(g, "/people"))
 }
@@ -273,6 +330,9 @@ type showRow struct {
 	Show     db.Show
 	People   []db.Person
 	Watchers map[int64]bool
+	// Was lists the watchers' IDs as they are now, e.g. "1,4"; the page
+	// sends it back so a save only touches shows the user changed.
+	Was string
 	// Catalogue is set when Jellyseerr is configured.
 	Catalogue bool
 }
@@ -318,6 +378,7 @@ func (s *Server) renderShows(w http.ResponseWriter, r *http.Request, g db.Group,
 		for _, pid := range watchers[sh.ID] {
 			row.Watchers[pid] = true
 		}
+		row.Was = joinIDs(watchers[sh.ID])
 		if sh.Archived {
 			v.Archived = append(v.Archived, row)
 		} else {
@@ -389,6 +450,49 @@ func (s *Server) createShow(w http.ResponseWriter, r *http.Request, g db.Group) 
 		}
 	}
 	redirect(w, r, groupPath(g, "/shows?add"))
+}
+
+// joinIDs writes IDs in ascending order, e.g. "1,4,7".
+func joinIDs(ids []int64) string {
+	ids = slices.Clone(ids)
+	slices.Sort(ids)
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = strconv.FormatInt(id, 10)
+	}
+	return strings.Join(parts, ",")
+}
+
+// saveWatchers applies the Shows page in one go. For every show the form
+// carries the ticked people ("w-<show>") and the watchers the page was
+// loaded with ("was-<show>"); only shows where the two differ are written,
+// so a save doesn't undo what someone else changed on another show.
+func (s *Server) saveWatchers(w http.ResponseWriter, r *http.Request, g db.Group) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	for key, was := range r.PostForm {
+		showID, err := strconv.ParseInt(strings.TrimPrefix(key, "was-"), 10, 64)
+		if !strings.HasPrefix(key, "was-") || err != nil || len(was) != 1 {
+			continue
+		}
+		var ids []int64
+		for _, v := range r.PostForm["w-"+strconv.FormatInt(showID, 10)] {
+			if id, err := strconv.ParseInt(v, 10, 64); err == nil {
+				ids = append(ids, id)
+			}
+		}
+		if joinIDs(ids) == was[0] {
+			continue
+		}
+		// Shows and people of other groups are ignored by the store.
+		if err := s.store.SetWatchers(r.Context(), g.ID, showID, ids); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+	}
+	redirect(w, r, groupPath(g, "/shows"))
 }
 
 func (s *Server) setWatchers(w http.ResponseWriter, r *http.Request, g db.Group) {

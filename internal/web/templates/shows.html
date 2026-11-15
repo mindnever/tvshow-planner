@@ -42,17 +42,16 @@
     </details>
   </div>
   {{if .People}}
-  <form id="watchers-{{.Show.ID}}" method="post" action="/g/{{.GroupID}}/shows/{{.Show.ID}}/watchers" class="pills" aria-label="Who watches {{.Show.Title}}">
+  {{/* The ticks belong to the page-wide form; "was" is what they were when the page loaded. */}}
+  <div class="pills" role="group" aria-label="Who watches {{.Show.Title}}">
+    <input type="hidden" name="was-{{.Show.ID}}" value="{{.Was}}" form="pagesave">
     {{range .People}}
-    <label class="pill"><input type="checkbox" name="person" value="{{.ID}}" {{if index $row.Watchers .ID}}checked{{end}}><span>{{.Name}}</span></label>
+    <label class="pill"><input type="checkbox" name="w-{{$row.Show.ID}}" value="{{.ID}}" form="pagesave" {{if index $row.Watchers .ID}}checked{{end}}><span>{{.Name}}</span></label>
     {{end}}
-  </form>
+  </div>
   {{else}}
   <p class="empty"><a href="/g/{{.GroupID}}/people">Add people</a> to choose who watches this.</p>
   {{end}}
-  <div class="card-actions">
-    {{if .People}}<button class="save" form="watchers-{{.Show.ID}}">Save watchers</button>{{end}}
-  </div>
   <div id="match-{{.Show.ID}}" class="match"></div>
 </li>
 {{end}}
@@ -81,6 +80,8 @@
 <p class="empty">No shows yet. Add one above, then pick who watches it together.</p>
 {{end}}
 
+<form id="pagesave" method="post" action="/g/{{$g.ID}}/shows/watchers"></form>
+
 {{if .D.Archived}}
 <details class="fold archived">
   <summary>Archived <span class="count">{{len .D.Archived}}</span></summary>
@@ -89,4 +90,5 @@
   </ul>
 </details>
 {{end}}
+{{template "savebar"}}
 {{end}}

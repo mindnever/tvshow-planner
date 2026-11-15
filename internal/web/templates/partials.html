@@ -128,3 +128,12 @@
 {{end}}
 {{end}}
 {{end}}
+
+{{/* Shown while the page has unsaved changes; its buttons act on the form with id "pagesave". */}}
+{{define "savebar"}}
+<div class="savebar" role="region" aria-label="Unsaved changes">
+  <span class="grow">Unsaved changes</span>
+  <button type="reset" form="pagesave" class="ghost">Discard</button>
+  <button form="pagesave">Save changes</button>
+</div>
+{{end}}

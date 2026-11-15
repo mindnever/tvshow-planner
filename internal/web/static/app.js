@@ -1,7 +1,66 @@
-// Ask before destructive form submissions: <button data-confirm="…">.
+document.documentElement.classList.add("js");
+
+// Pages with a "Save changes" bar collect their edits in the form with id
+// "pagesave". unsaved() mirrors the CSS that shows the bar.
+function unsaved() {
+  return document.querySelector(
+    '.changed, input[form="pagesave"]:checked:not([checked]), input[form="pagesave"][checked]:not(:checked)') !== null;
+}
+
 document.addEventListener("submit", (e) => {
+  // Ask before destructive form submissions: <button data-confirm="…">.
   const msg = e.submitter && e.submitter.dataset.confirm;
-  if (msg && !window.confirm(msg)) e.preventDefault();
+  if (msg && !window.confirm(msg)) {
+    e.preventDefault();
+    return;
+  }
+  if (e.target.id === "pagesave") {
+    // Saving the People page: removing someone can't be undone.
+    const names = [...e.target.elements].filter((el) => el.name === "remove" && el.checked).map((el) => el.dataset.name);
+    if (names.length && !window.confirm(`Remove ${names.join(", ")} from the group and from every show?`)) e.preventDefault();
+    return;
+  }
+  // Any other form reloads the page and would lose the edits.
+  if (unsaved() && !window.confirm("This page has unsaved changes. Continue without saving them?")) e.preventDefault();
+});
+
+// Mark a row whose text field no longer holds what was loaded.
+document.addEventListener("input", (e) => {
+  const input = e.target;
+  if (input.type === "text" && input.getAttribute("form") === "pagesave") {
+    input.closest("li").classList.toggle("changed", input.value.trim() !== input.defaultValue);
+  }
+});
+// Enter in a name field finishes that edit; it doesn't save the whole page.
+document.addEventListener("keydown", (e) => {
+  const input = e.target;
+  if (e.key === "Enter" && input.type === "text" && input.getAttribute("form") === "pagesave") {
+    e.preventDefault();
+    input.blur();
+  }
+});
+
+// A person marked for removal can't be renamed as well: the name goes back
+// to what it was and is locked until the mark is taken off again.
+document.addEventListener("change", (e) => {
+  const box = e.target;
+  if (box.name !== "remove" || box.getAttribute("form") !== "pagesave") return;
+  const row = box.closest("li");
+  const name = row.querySelector('input[type="text"]');
+  if (!name) return;
+  if (box.checked) {
+    name.value = name.defaultValue;
+    row.classList.remove("changed");
+  }
+  name.readOnly = box.checked;
+});
+// "Discard" resets the form; the fields go back by themselves, the marks
+// and locks don't.
+document.addEventListener("reset", (e) => {
+  if (e.target.id === "pagesave") {
+    for (const row of document.querySelectorAll(".changed")) row.classList.remove("changed");
+    for (const name of document.querySelectorAll('input[form="pagesave"][readonly]')) name.readOnly = false;
+  }
 });
 
 // A read-only field holding something to pass on: any click selects all of it.

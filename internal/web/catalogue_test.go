@@ -253,7 +253,7 @@ func TestTypedTitlesAreMatched(t *testing.T) {
 	options := app.get(alice, "/g/1/shows/2/match")
 	mustContain(t, options, "2017", "2020", `action="/g/1/shows/2/match"`)
 	shows = app.post(alice, "/g/1/shows/2/match", url.Values{"tmdb_id": {"200"}})
-	mustContain(t, shows, "Dark", "2017", "Downloading", `name="person" value="1" checked`)
+	mustContain(t, shows, "Dark", "2017", "Downloading", `name="w-2" value="1" form="pagesave" checked`)
 	mustNotContain(t, shows, "Find match", "· not in Jellyfin")
 
 	// The other Dark can't be matched to a show that already has an entry.

@@ -123,16 +123,26 @@ form.custom button { white-space: normal; overflow-wrap: anywhere; text-align: l
 .pill span { display: block; padding: .35rem .85rem; border-radius: 2rem; border: 1.5px solid var(--line); color: var(--muted); font-size: .95rem; }
 .pill input:checked + span { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .pill input:focus-visible + span { outline: 3px solid var(--accent); outline-offset: 2px; }
-.card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem; margin: -.2rem -.35rem -.3rem; }
-.card-actions .save { margin-left: auto; min-height: 2.2rem; padding: .3rem .9rem; }
-.card-actions { margin: 0; }
-/* Show "Save watchers" only when a checkbox differs from its saved state
-   (the checked attribute is what the server rendered; :checked is the current state). */
-.card:not(:has(.pills input:checked:not([checked]), .pills input[checked]:not(:checked))) .save { display: none; }
+/* Unsaved changes. A checkbox is changed when its current state differs from
+   the checked attribute the server rendered; app.js marks renamed rows. */
+.card:has(.pills input:checked:not([checked]), .pills input[checked]:not(:checked)), ul.rows li.changed { box-shadow: inset 3px 0 0 var(--accent); }
+.card:has(.pills input:checked:not([checked]), .pills input[checked]:not(:checked)) h2::before { content: ""; display: inline-block; width: .5rem; height: .5rem; margin-right: .45rem; border-radius: 50%; background: var(--accent); vertical-align: .1em; }
+.savebar { position: sticky; bottom: 0; z-index: 20; display: none; align-items: center; gap: .5rem; margin: 1rem -1rem -4rem; padding: .6rem 1rem calc(.6rem + env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--line); box-shadow: 0 -.4rem 1rem rgb(0 0 0 / .15); color: var(--muted); font-weight: 500; }
+main:has(.changed, input[form=pagesave]:checked:not([checked]), input[form=pagesave][checked]:not(:checked)) .savebar { display: flex; }
+.savebar .grow { font-size: .9rem; white-space: nowrap; }
+.savebar button { padding: .5rem .8rem; }
+/* Without JavaScript a renamed person can't be detected, so always offer to save. */
+html:not(.js) main:has(.people) .savebar { display: flex; }
 
-/* ---- collapsible sections ---- */
-/* The action row only holds "Save watchers": no row when there is nothing to save. */
-.card:not(:has(.pills input:checked:not([checked]), .pills input[checked]:not(:checked))) .card-actions { display: none; }
+/* People: "Remove" only marks a person until the page is saved. */
+.toggle { position: relative; flex: none; padding: .3rem .6rem; border-radius: .6rem; color: var(--danger); font-weight: 500; cursor: pointer; user-select: none; }
+.toggle:hover { background: var(--raised); }
+.toggle input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.toggle:has(input:focus-visible) { outline: 3px solid var(--accent); outline-offset: 2px; }
+.toggle .on, .toggle:has(input:checked) .off { display: none; }
+.toggle:has(input:checked) .on { display: inline; color: var(--accent); }
+ul.rows li:has(.toggle input:checked) { box-shadow: inset 3px 0 0 var(--danger); }
+ul.rows li:has(.toggle input:checked) > input { text-decoration: line-through; opacity: .55; pointer-events: none; user-select: none; }
 
 /* "⋯" menu with a card's less common actions. */
 .menu { position: relative; align-self: flex-start; flex: none; margin: -.3rem -.35rem 0 0; }
