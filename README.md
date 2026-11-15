@@ -21,7 +21,7 @@ The app works with one Jellyfin server, set with `JELLYFIN_URL`. Jellyfin is the
 - **Quick Connect** shows a code to enter in a Jellyfin app where you are already signed in. It must be enabled on the server.
 - The access token Jellyfin issues is stored encrypted with `SECRET_KEY`.
 
-**A group reads Jellyfin as its owner**, the user who created it. The library, posters and watched progress the group shows are the owner's, whoever is looking at it. An owner can share a group with other Jellyfin users through an invite link; they manage the same group and see the same progress. If the owner's Jellyfin token stops working (for example the device was removed in Jellyfin), the group keeps its cached data and says so until the owner logs in again.
+**A group reads Jellyfin as its owner**, the user who created it. The library and posters the group shows are the owner's, whoever is looking at it. An owner can share a group with other Jellyfin users through an invite link; they manage the same group and see the same shows. If the owner's Jellyfin token stops working (for example the device was removed in Jellyfin), the group keeps its cached data and says so until the owner logs in again.
 
 The app only reads from Jellyfin (library, watched counts, next-up, posters) and proxies posters, so browsers never need to reach Jellyfin themselves. Progress refreshes when the Tonight page is opened and the cache is older than 10 minutes, or on demand.
 
@@ -35,7 +35,7 @@ With `JELLYSEERR_URL` and `JELLYSEERR_API_KEY` set (Jellyseerr or Seerr; the key
 
 - A show can be added before it is available, with its poster and status (not requested, requested, downloading, partly available), and requested from the same place.
 - Requests are made in the name of the logged-in user: their Jellyseerr account is found by their Jellyfin user ID, so their approval rules and quota apply. Someone who has never logged in to Jellyseerr can't request.
-- When Jellyseerr reports the show in Jellyfin, the next refresh links it and progress appears. Until then it is listed on Tonight greyed out, last in its tier.
+- When Jellyseerr reports the show in Jellyfin, the next refresh links it. Until then it is listed on Tonight greyed out, last in its tier.
 - Typed titles added earlier are matched once to the catalogue show with exactly the same name. Ambiguous ones get a **Find match** button to pick the right show; watchers are kept.
 
 The API key can act as any Jellyseerr user, so treat it like an admin password; it is only read from the environment. Posters of catalogue shows are fetched by the app from TMDB's image host (`image.tmdb.org`), not by browsers.

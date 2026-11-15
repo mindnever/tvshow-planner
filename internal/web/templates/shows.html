@@ -11,7 +11,8 @@
     <h2 class="grow">{{.Show.Title}}{{if .Show.Year}} <span class="year">{{.Show.Year}}</span>{{end}}
       {{if .Show.WatchOn}}<span class="badge wait">On {{.Show.WatchOn}}</span>
       {{else if awaiting .Show}}<span class="badge wait">{{status .Show.Availability}}</span>
-      {{else if $outside}}<span class="year">· not in Jellyfin</span>{{end}}</h2>
+      {{else if $outside}}<span class="year">· not in Jellyfin</span>
+      {{else}}<span class="badge wait">On {{jellyfinName}}</span>{{end}}</h2>
     <details class="menu">
       <summary aria-label="More actions for {{.Show.Title}}">⋯</summary>
       <div class="menu-panel">

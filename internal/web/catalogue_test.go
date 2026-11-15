@@ -191,9 +191,9 @@ func TestCatalogueAddRequestAndLink(t *testing.T) {
 			"UserData": map[string]any{"UnplayedItemCount": 2}})
 	})
 	planner := app.post(alice, "/g/1/sync", nil)
-	mustContain(t, planner, "Slow Horses", "2 unwatched")
+	mustContain(t, planner, "Slow Horses", "On Home Media")
 	mustNotContain(t, planner, "Not available yet")
-	mustNotContain(t, app.get(alice, "/g/1/shows"), "badge wait")
+	mustNotContain(t, app.get(alice, "/g/1/shows"), "Requested", "Not requested")
 
 	// Adding without requesting, then requesting from the card.
 	shows = app.post(alice, "/g/1/shows", url.Values{"tmdb_id": {"300"}})
@@ -313,7 +313,7 @@ func TestWatchedElsewhere(t *testing.T) {
 	app.post(alice, "/g/1/presence/1", nil)
 	planner := app.get(alice, "/g/1")
 	mustContain(t, planner, "Quiz Night", "On My Disc Shelf")
-	mustNotContain(t, planner, "Not available yet", " finished")
+	mustNotContain(t, planner, "Not available yet", " finished", "On Home Media")
 
 	// It is left alone even when it turns up in Jellyfin.
 	app.js.set(func() { app.js.status[300], app.js.jellyfin[300] = 5, slowHorsesID })
@@ -326,7 +326,7 @@ func TestWatchedElsewhere(t *testing.T) {
 
 	// Clearing it hands the show back: the next sync links it to Jellyfin.
 	mustNotContain(t, app.post(alice, "/g/1/shows/1/where", url.Values{"where": {""}}), "On My Disc Shelf")
-	mustContain(t, app.post(alice, "/g/1/sync", nil), "Quiz Night", "4 unwatched")
+	mustContain(t, app.post(alice, "/g/1/sync", nil), "Quiz Night", "On Home Media")
 
 	// A show in Jellyfin is watched there; other people's groups are off limits.
 	if code, _ := app.do(alice, "POST", "/g/1/shows/2/where", url.Values{"where": {"Netflix"}}); code != http.StatusBadRequest {

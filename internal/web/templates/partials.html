@@ -21,7 +21,7 @@
   </div>
 
   {{if .SyncError}}
-  <p class="notice">Couldn't refresh from Jellyfin, so progress may be out of date. <span class="detail">{{.SyncError}}</span></p>
+  <p class="notice">Couldn't refresh from Jellyfin. <span class="detail">{{.SyncError}}</span></p>
   {{end}}
 
   {{if not .HasShows}}
@@ -44,9 +44,7 @@
         {{else}}<p class="badge warn">Missing {{join .Missing}}</p>{{end}}
         {{if .Show.WatchOn}}<p class="next">On {{.Show.WatchOn}}</p>
         {{else if awaiting .Show}}<p class="next">Not available yet · {{status .Show.Availability}}</p>
-        {{else if .Finished}}<p class="next">All caught up</p>
-        {{else if .Show.NextUp}}<p class="next">Next: {{.Show.NextUp}}</p>
-        {{else if .Show.Unplayed}}<p class="next">{{.Show.Unplayed}} unwatched</p>{{end}}
+        {{else if .Show.JellyfinID}}<p class="next">On {{jellyfinName}}</p>{{end}}
       </div>
     </li>
     {{end}}

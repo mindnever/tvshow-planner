@@ -176,6 +176,15 @@ func AuthenticateQuickConnect(ctx context.Context, hc *http.Client, baseURL, dev
 	return c, name, err
 }
 
+// ServerName returns the name the Jellyfin server was given by its admin.
+// It needs no login.
+func ServerName(ctx context.Context, hc *http.Client, baseURL string) (string, error) {
+	c := &Client{BaseURL: baseURL, HTTP: hc}
+	var out struct{ ServerName string }
+	err := c.getJSON(ctx, "/System/Info/Public", nil, &out)
+	return strings.TrimSpace(out.ServerName), err
+}
+
 type Series struct {
 	ID           string
 	Name         string

@@ -33,6 +33,7 @@ type fakeJellyfin struct {
 	qcApproved  bool
 	qcForgotten bool
 	itemUsers   map[string]bool  // userId values seen on /Items
+	nameless    bool             // the server can't be asked for its name
 	extra       []map[string]any // series added to the library during a test
 }
 
@@ -99,6 +100,15 @@ func newFakeJellyfin(t *testing.T) *fakeJellyfin {
 			return
 		}
 		session(w, "carol")
+	})
+	mux.HandleFunc("GET /System/Info/Public", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if f.nameless {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		json.NewEncoder(w).Encode(m{"ServerName": " Home Media ", "Version": "10.10.0"})
 	})
 	mux.HandleFunc("GET /Items", func(w http.ResponseWriter, r *http.Request) {
 		user := tokenUser(r)
@@ -352,10 +362,15 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatalf("presence fragment: %d\n%s", code, frag)
 	}
 	mustContain(t, frag,
-		"Everyone's here", "Next: S02E05 · Trojan&#39;s Horse", // Severance: exact
-		"Bo doesn't follow it", "All caught up", // Andor: extra person, finished
-		"Missing Cy", // Quiz Night: partial
+		"Everyone's here", "On Home Media", // Severance: exact, with where it is watched
+		"Bo doesn't follow it", // Andor: extra person
+		"Missing Cy",           // Quiz Night: partial
 		`src="/g/1/image/`+severanceID+`"`)
+	// Watched progress is not shown for now.
+	mustNotContain(t, frag, "Next:", "unwatched", "All caught up", " finished")
+	if n := strings.Count(frag, "On Home Media"); n != 2 {
+		t.Errorf("shows labelled with the server name = %d, want 2 (not Quiz Night)", n)
+	}
 	order := []int{strings.Index(frag, "Severance"), strings.Index(frag, "Andor"), strings.Index(frag, "Quiz Night")}
 	if !(order[0] >= 0 && order[0] < order[1] && order[1] < order[2]) {
 		t.Errorf("wrong ranking order %v:\n%s", order, frag)
@@ -413,7 +428,18 @@ func TestEndToEnd(t *testing.T) {
 
 	// Jellyfin going away keeps cached data and shows a notice.
 	app.jf.Close()
-	mustContain(t, app.post(alice, "/g/1/sync", nil), "Couldn't refresh from Jellyfin", "Next: S02E05")
+	mustContain(t, app.post(alice, "/g/1/sync", nil), "Couldn't refresh from Jellyfin", "Severance")
+}
+
+func TestServerNameFallback(t *testing.T) {
+	app := newTestApp(t)
+	app.jf.set(func() { app.jf.nameless = true })
+	alice := app.client("alice")
+	app.post(alice, "/groups", url.Values{"name": {"Family"}})
+	// A server that can't be asked for its name is plain "Jellyfin".
+	shows := app.post(alice, "/g/1/shows", url.Values{"jellyfin_id": {severanceID}})
+	mustContain(t, shows, `<span class="badge wait">On Jellyfin</span>`)
+	mustNotContain(t, shows, "Home Media")
 }
 
 func TestAccessControlAndInvites(t *testing.T) {

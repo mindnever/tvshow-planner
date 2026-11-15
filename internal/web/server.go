@@ -3,6 +3,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"embed"
 	"errors"
 	"html/template"
@@ -11,11 +12,13 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
 	"tvshow-planner/internal/auth"
 	"tvshow-planner/internal/db"
+	"tvshow-planner/internal/jellyfin"
 	"tvshow-planner/internal/secretbox"
 	"tvshow-planner/internal/seerr"
 )
@@ -35,6 +38,32 @@ type Server struct {
 	hc          *http.Client  // for Jellyfin
 	seerr       *seerr.Client // nil when Jellyseerr isn't configured
 	pages       map[string]*template.Template
+
+	// The Jellyfin server's name, looked up now and then.
+	nameMu    sync.Mutex
+	name      string
+	nameCheck time.Time // when to ask again
+}
+
+// serverName is what the Jellyfin server is called, for labels like "On
+// Home Media". Until the server has told us, it is plain "Jellyfin".
+func (s *Server) serverName() string {
+	s.nameMu.Lock()
+	defer s.nameMu.Unlock()
+	if time.Now().After(s.nameCheck) {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		name, err := jellyfin.ServerName(ctx, s.hc, s.jellyfinURL)
+		if err == nil && name != "" {
+			s.name, s.nameCheck = cleanName(name), time.Now().Add(time.Hour)
+		} else {
+			s.nameCheck = time.Now().Add(time.Minute)
+		}
+	}
+	if s.name == "" {
+		return "Jellyfin"
+	}
+	return s.name
 }
 
 // New builds the server. sc is the optional Jellyseerr client; nil turns off
@@ -47,7 +76,7 @@ func New(store *db.Store, a *auth.Auth, box *secretbox.Box, baseURL, jellyfinURL
 	}
 	for _, name := range []string{"home", "planner", "shows", "people", "settings", "invite", "message", "login", "quickconnect"} {
 		s.pages[name] = template.Must(template.New("").Funcs(template.FuncMap{
-			"join": joinNames, "awaiting": awaiting, "status": availabilityLabel, "requestable": seerr.Requestable,
+			"join": joinNames, "jellyfinName": s.serverName, "awaiting": awaiting, "status": availabilityLabel, "requestable": seerr.Requestable,
 		}).ParseFS(templateFS,
 			"templates/base.html", "templates/partials.html", "templates/"+name+".html"))
 	}

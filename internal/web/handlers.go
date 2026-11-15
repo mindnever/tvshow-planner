@@ -145,10 +145,9 @@ func (s *Server) plannerView(ctx context.Context, g db.Group, here map[int64]boo
 		byID[sh.ID] = sh
 		candidates = append(candidates, planner.Show{
 			ID: sh.ID, Title: sh.Title, Watchers: watchers[sh.ID],
-			// Progress is only known for synced Jellyfin shows.
-			Finished:     sh.JellyfinID != "" && sh.SyncedAt > 0 && sh.Unplayed == 0,
-			LastPlayedAt: sh.LastPlayedAt,
-			Unavailable:  awaiting(sh),
+			// Watched progress is not used for now: it only reflects the
+			// owner's Jellyfin account, which is often not how the group watches.
+			Unavailable: awaiting(sh),
 		})
 	}
 	toNames := func(ids []int64) []string {
@@ -659,11 +658,6 @@ func (s *Server) doSync(ctx context.Context, groupID int64) error {
 		}
 		sh.Title, sh.Year, sh.HasImage = sr.Name, sr.Year, sr.HasImage
 		sh.Unplayed, sh.LastPlayedAt, sh.NextUp = sr.Unplayed, sr.LastPlayedAt, ""
-		if sr.Unplayed > 0 && !sh.Archived {
-			if sh.NextUp, err = c.NextUp(ctx, sr.ID); err != nil {
-				return err
-			}
-		}
 		if err := s.store.UpdateShowSync(ctx, sh); err != nil {
 			return err
 		}
